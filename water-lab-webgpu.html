@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.12.15 Unified bulk-water spectrum</title>
+<title>Rift Water Lab · WebGPU 28.12.16 Natural crest and capillary optics</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -109,7 +109,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.12.15</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.12.16</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="islandWaypoint" style="display:flex;align-items:center;gap:9px;padding:7px 0;color:#c5f5e9;font-size:13px"><span id="islandArrow" style="display:inline-block;font-size:22px;line-height:1;transform-origin:center">↑</span><span id="islandDistance">Island · locating</span></div>
@@ -388,7 +388,11 @@ function createOceanMaterial(options){
   const viewDistance=cameraPosition.sub(positionWorld).length();
   const detailFade=float(1).sub(oceanTSL.smoothstep(12,65,viewDistance));
   const ripple=oceanGlintControls.z.clamp(0,2).mul(float(.17).sub(sculpted.mul(.06))).mul(detailFade);
-  const microNormal=n.add(vec3(microX.mul(ripple),0,microZ.mul(ripple))).normalize();
+  // Wind-aligned capillary slopes with a longer cross-swell modulation.
+  const gust=x.mul(.19).add(z.mul(.11)).sub(time.mul(.42)).sin().mul(.18).add(.82);
+  const windSlope=microX.mul(.82).add(microZ.mul(.32));
+  const crossSlope=microZ.mul(.72).sub(microX.mul(.26));
+  const microNormal=n.add(vec3(windSlope.mul(ripple).mul(gust),0,crossSlope.mul(ripple).mul(gust))).normalize();
   const sun=vec3(16,35,8).normalize(),halfVector=sun.add(v).normalize();
   const nh=microNormal.dot(halfVector).max(0).clamp(0,1);
   const nl=microNormal.dot(sun).max(0).clamp(0,1);
@@ -411,13 +415,16 @@ function createOceanMaterial(options){
   const distribution=a2.div(denom.mul(denom).mul(Math.PI).max(.000001));
   const k=alpha.add(1).pow(2).mul(.125);
   const geometryTerm=nl.div(nl.mul(float(1).sub(k)).add(k)).mul(nv.div(nv.mul(float(1).sub(k)).add(k)));
-  const glint=distribution.mul(geometryTerm).mul(f).div(nv.mul(4).max(.08)).clamp(0,1.7)
-   .mul(nl.greaterThan(0).select(1,0)).mul(oceanGlintControls.y.clamp(0,2)).mul(.34).mul(above);
+  const glint=distribution.mul(geometryTerm).mul(f).div(nv.mul(4).max(.08)).clamp(0,1.35)
+   .mul(nl.greaterThan(0).select(1,0)).mul(oceanGlintControls.y.clamp(0,2)).mul(.25).mul(above);
   // Forward scattering through thin, backlit crests. Continuous height
   // and lighting dependence, independent of the local simulation domain.
-  const crest=oceanTSL.smoothstep(.12,1.3,positionWorld.y);
-  const backlight=v.dot(sun).max(0).pow(3);
-  const thin=crest.mul(backlight).mul(float(1).sub(n.dot(sun).abs().clamp(0,1))).mul(oceanGlintControls.w.clamp(0,2)).mul(.16).mul(above);
+  const crest=oceanTSL.smoothstep(.20,1.45,positionWorld.y);
+  const backlight=v.dot(sun.negate()).max(0).pow(2.5);
+  const wall=oceanTSL.smoothstep(.035,.42,slope);
+  const thinPath=float(.28).add(float(1).sub(crest).mul(1.8)).div(n.dot(sun).abs().max(.22)).min(6);
+  const crestTransmission=vec3(.85,.21,.095).mul(thinPath).negate().exp();
+  const thin=crest.mul(backlight).mul(wall).mul(float(1).sub(airFresnel)).mul(oceanGlintControls.w.clamp(0,2)).mul(.22).mul(above);
   // Spectral extinction along the actual eye-to-interface ray, rather than camera depth alone.
   underwaterPathOptics=uniform(new THREE.Vector4(.19,.070,.040,.022));
   const eyePath=viewDistance.min(150);
@@ -558,7 +565,7 @@ function createOceanMaterial(options){
    return result;
   })();
   mat.emissiveNode=materialEmissive.add(reflected.mul(reflectance).mul(wet).mul(directionalUnderside?.93:1))
-   .add(vec3(1,.96,.88).mul(glint)).add(vec3(.045,.33,.38).mul(thin)).add(lensGlow);
+   .add(vec3(1,.96,.88).mul(glint)).add(vec3(.15,.52,.48).mul(crestTransmission).mul(thin)).add(lensGlow);
   return mat;
  }catch(e){mat?.dispose();console.warn('Angle optics fallback:',e);return new THREE.MeshPhysicalMaterial(options);}
 }
@@ -8859,4 +8866,4 @@ begin().catch(error=>{
 });
 </script>
 </body></html>
-<!-- GitHub Pages redeploy trigger for Water Lab 28.12.15 -->
+<!-- GitHub Pages redeploy trigger for Water Lab 28.12.16 -->

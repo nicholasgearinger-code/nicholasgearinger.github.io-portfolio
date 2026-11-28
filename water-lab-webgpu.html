@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.9.3 Natural shoreline physics</title>
+<title>Rift Water Lab · WebGPU 28.9.4 Unified joystick controls</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -23,6 +23,11 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 .gameHelm button{flex-shrink:1}
 .gameHelm output{min-width:35px;font-size:12px}
 #threeCanvas{touch-action:none;overscroll-behavior:none;cursor:grab}
+#joystick{position:absolute;z-index:5;left:max(18px,env(safe-area-inset-left));bottom:max(18px,env(safe-area-inset-bottom));width:142px;height:142px;border:1px solid #83dce8;border-radius:50%;background:radial-gradient(circle at 50% 48%,#1c7185aa 0%,#0b4058c9 64%,#062a3bdc 100%);box-shadow:0 8px 26px #001a,inset 0 0 0 7px #b5f4f022;touch-action:none;user-select:none;-webkit-user-select:none;display:grid;place-items:center}
+#joystick:before{content:'';position:absolute;width:72%;height:72%;border:1px dashed #b8edf566;border-radius:50%;pointer-events:none}
+#joystickKnob{position:absolute;width:58px;height:58px;border-radius:50%;background:linear-gradient(145deg,#b5f4f5,#398fa2 72%);border:2px solid #d8ffff;box-shadow:0 5px 15px #001b,inset 0 2px 5px #fff9;transform:translate(0,0);pointer-events:none}
+#joystickHint{position:absolute;left:50%;top:calc(100% + 7px);transform:translateX(-50%);font-size:10px;white-space:nowrap;color:#d0f7f7;text-shadow:0 1px 4px #001;pointer-events:none}
+@media(max-width:640px){#joystick{width:132px;height:132px}#joystickKnob{width:54px;height:54px}}
 #threeCanvas:active{cursor:grabbing}
 #cameraHint{position:absolute;top:48%;left:50%;transform:translate(-50%,-50%);z-index:2;background:#0a2535d9;border:1px solid #4da0aa;border-radius:11px;padding:8px 12px;color:#e3ffff;font-size:12px;pointer-events:none;opacity:.9}
 #modeSwitch[aria-pressed="true"]{background:#247b8a;border-color:#78e5df}
@@ -72,7 +77,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.9.3</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.9.4</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="frameProfile" style="font-size:11px;line-height:1.4;color:#b5e4e8;margin:4px 0" role="status">Frame profiler: collecting</div>
@@ -167,12 +172,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 
  </div>
 </div>
-<div id="sailControls" class="panel gameHelm">
-<button id="port" aria-label="Turn left">◀ Left</button>
-<button id="forward" aria-label="Move forward">▲ Forward</button>
-<button id="stopBoat" aria-label="Stop boat">■ Stop</button>
-<button id="starboard" aria-label="Turn right">Right ▶</button>
-</div>
+<div id="joystick" role="application" aria-label="Movement joystick. Push in any direction to steer and move; release to stop."><div id="joystickKnob"></div><span id="joystickHint">MOVE · STEER</span></div>
 <div id="cameraHint">Drag to look around · Pinch to zoom</div>
 <script>
 (function(){
@@ -223,6 +223,7 @@ import {createGPUFFTOcean} from './rift/water_lab_webgpu_fft_v22.js?v=28-5-6';
 const $=id=>document.getElementById(id);
 let renderer,scene,camera,water,geometry,base,THREE,boat,player,nearWater,nearGeometry,nearBase,nearColorData,skyDome;
 let walkMode=false,walkHeading=0,walkForward=false,walkLeft=false,walkRight=false;
+let joystickX=0,joystickY=0,joystickPointer=null;
 let buoyancyStrength=1,vy=0,pitchV=0,rollV=0,rideDamping=1;
 let boatHeading=0,boatSpeed=0,rudder=0,sailPower=.85,driveMode='stop',steeringLeft=false,steeringRight=false,totalTravel=0,hullPhysics='dynamic',lastHullDrag=0;
 let wakeSolver=null,wakeAmount=1.1,waveChop=.45,previousBoatHeading=0,turnVelocity=0;
@@ -7205,19 +7206,20 @@ function setWalkMode(enabled){
   if(gap>7.5){$('log').textContent='Sail closer to the beach before leaving the boat.';return;}
   player.position.set(boat.position.x,beachGround(boat.position.x,coast+19.2)+.04,coast+19.2);
   walkHeading=boatHeading;player.rotation.y=walkHeading;player.visible=true;walkMode=true;boatSpeed=0;setDriveMode('stop');
-  $('leaveBoat').textContent='Return to boat';$('port').textContent='◀ Turn';$('starboard').textContent='Turn ▶';$('forward').textContent='▲ Walk';$('stopBoat').textContent='Board boat';$('buoyancyState').textContent='On foot · hold Walk to move';
+  $('leaveBoat').textContent='Return to boat';$('buoyancyState').textContent='On foot · joystick movement';
  }else{
   if(Math.hypot(player.position.x-boat.position.x,player.position.z-boat.position.z)>7){$('log').textContent='Walk closer to the boat to board it.';return;}
   walkMode=false;player.visible=false;walkForward=walkLeft=walkRight=false;
   boat.position.y=Math.max(.55,oceanHeight(boat.position.x,boat.position.z,clockTime)+.35);vy=0;boatSpeed=0;boatHeading=walkHeading;boat.rotation.y=boatHeading;
-  $('leaveBoat').textContent='Leave boat';$('port').textContent='◀ Left';$('starboard').textContent='Right ▶';$('forward').textContent='▲ Forward';$('stopBoat').textContent='■ Stop';$('buoyancyState').textContent='Boat: 4-point floating + sailing';
+  $('leaveBoat').textContent='Leave boat';$('buoyancyState').textContent='Boat: 4-point floating + sailing';
  }
 }
 function stepPlayer(dt){
  if(!walkMode||!player?.visible||dt<=0)return;
- if(walkLeft)walkHeading+=dt*1.65;if(walkRight)walkHeading-=dt*1.65;
- if(walkForward){
-  const nx=player.position.x-Math.sin(walkHeading)*dt*3.1,nz=player.position.z-Math.cos(walkHeading)*dt*3.1;
+ walkHeading-=joystickX*dt*1.85;
+ if(Math.abs(joystickY)>.06){
+  const stride=joystickY*dt*3.1;
+  const nx=player.position.x-Math.sin(walkHeading)*stride,nz=player.position.z-Math.cos(walkHeading)*stride;
   // Permit movement over the full island heightfield as well as the beach;
   // reject only points beyond the island perimeter or out into the ocean.
   if(isWalkableIslandPoint(nx,nz)){player.position.x=nx;player.position.z=nz;}
@@ -7276,11 +7278,11 @@ function stepBoatClassic(dt,t){
  if(!boatProbeOffset)boatProbeOffset=new THREE.Vector3();
  const steps=Math.max(1,Math.min(5,Math.ceil(dt/(1/100)))),h=dt/steps;
  const mass=320,inertiaX=mass*2.65,inertiaZ=mass*.95;
- const desiredRudder=(steeringLeft?1:0)-(steeringRight?1:0);
+ const desiredRudder=joystickX;
  rudder+=(desiredRudder-rudder)*Math.min(1,dt*3.6);
  for(let k=0;k<steps;k++){
-  const advancing=driveMode==='forward';
-  const thrust=advancing?(propulsionMode==='power'?sailPower*10:
+  const throttle=Math.max(0,joystickY),advancing=throttle>.025;
+  const thrust=advancing?throttle*(propulsionMode==='power'?sailPower*10:
    sailPower*3.15*(.35+.65*Math.abs(Math.cos(boatHeading+.7)))):0;
   const drag=.12*boatSpeed+(propulsionMode==='power'?.045:.082)*boatSpeed*Math.abs(boatSpeed);
   const braking=advancing?0:Math.min(boatSpeed/h,2.7);
@@ -7363,11 +7365,11 @@ function stepBoat(dt,t){
  const steps=Math.max(1,Math.min(6,Math.ceil(dt/.008))),h=dt/steps;
  const mass=520+Math.min(24,Math.max(0,deckMass)),Ix=mass*2.35,Iz=mass*.65,Iy=mass*2.1;
  // Added water mass increases heave inertia only while immersed.
- const desired=(steeringLeft?1:0)-(steeringRight?1:0);
+ const desired=joystickX;
  rudder+=(desired-rudder)*(1-Math.exp(-dt*3.8));
  for(let k=0;k<steps;k++){
   const fx=-Math.sin(boatHeading),fz=-Math.cos(boatHeading),rx=-fz,rz=fx;
-  const forward=driveMode==='forward',powered=propulsionMode==='power';
+  const throttle=Math.max(0,joystickY),forward=throttle>.025,powered=propulsionMode==='power';
   const vx=fx*boatSpeed+hullSlipX,vz=fz*boatSpeed+hullSlipZ;
   let fy=-mass*9.81,tx=0,tz=0,forceX=0,forceZ=0,yaw=0,wet=0,load=0,slam=0;
   let entryX=0,entryZ=0,entryArea=0,entrySpeed=0,exteriorSum=0,exteriorWeight=0;
@@ -7415,7 +7417,7 @@ function stepBoat(dt,t){
   if(deckFloodEnabled&&breakingMode==='advanced'){tx+=Math.max(-100,Math.min(100,deckMomentZ*9.81));tz-=Math.max(-75,Math.min(75,deckMomentX*9.81));}
   // No hydrodynamic torque or thrust in free flight. Existing wake persists.
   tx-=pitchV*Ix*(.04+3.2*rideDamping*hullContact);tz-=rollV*Iz*(.04+3.1*rideDamping*hullContact);
-  const thrust=forward?mass*sailPower*(powered?8.2:3.0*(.35+.65*Math.abs(Math.cos(boatHeading+.7)))):0;
+  const thrust=forward?throttle*mass*sailPower*(powered?8.2:3.0*(.35+.65*Math.abs(Math.cos(boatHeading+.7)))):0;
   forceX+=fx*thrust*hullContact;forceZ+=fz*thrust*hullContact;
   const steer=rudder*Math.min(1,boatSpeed/2+.15);
   yaw+=Iy*steer*(.35+.10*boatSpeed)*hullContact-Iy*hullYawRate*(.08+2.12*hullContact);
@@ -7468,45 +7470,49 @@ function stepBoat(dt,t){
 }
 function setDriveMode(mode){
  driveMode=mode==='forward'?'forward':'stop';
- $('forward').setAttribute('aria-pressed',String(driveMode==='forward'));
- $('stopBoat').setAttribute('aria-pressed',String(driveMode==='stop'));
  $('buoyancyState').textContent=driveMode==='forward'?'Boat: sailing forward':'Boat: stopped / braking';
  $('driveStatus').textContent='Drive: '+(driveMode==='forward'?'FORWARD':'STOP');
 }
-$('forward').onclick=()=>{if(!walkMode)setDriveMode('forward');};
-$('stopBoat').onclick=()=>{if(!walkMode)setDriveMode('stop');};
-// Immediate touch/pointer feedback, independent of synthesized click delays.
-$('forward').addEventListener('pointerdown',()=>{if(walkMode)walkForward=true;else setDriveMode('forward');});
-$('stopBoat').addEventListener('pointerdown',()=>{if(walkMode)setWalkMode(false);else setDriveMode('stop');});
 $('sailPower').oninput=()=>{
  sailPower=Number($('sailPower').value);
  $('sailPowerOut').textContent=Math.round(sailPower*100)+'%';
 };
 setDriveMode('stop');
-function bindHelm(id,dir){
- const node=$(id);
- const hold=()=>{if(dir<0)steeringLeft=true;else steeringRight=true;};
- const release=()=>{if(dir<0)steeringLeft=false;else steeringRight=false;};
- node.addEventListener('pointerdown',e=>{e.preventDefault();node.setPointerCapture(e.pointerId);hold();});
- node.addEventListener('pointerup',release);
- node.addEventListener('pointercancel',release);
- node.addEventListener('lostpointercapture',release);
+const joystick=$('joystick'),joystickKnob=$('joystickKnob'),joystickRadius=48;
+function updateJoystick(e){
+ const rect=joystick.getBoundingClientRect(),cx=rect.left+rect.width/2,cy=rect.top+rect.height/2;
+ let dx=(e.clientX-cx)/joystickRadius,dy=(cy-e.clientY)/joystickRadius;
+ const mag=Math.hypot(dx,dy);if(mag>1){dx/=mag;dy/=mag;}
+ const dead=.10;
+ joystickX=Math.abs(dx)<dead?0:dx;
+ joystickY=Math.abs(dy)<dead?0:dy;
+ joystickKnob.style.transform='translate('+ (dx*joystickRadius*.78)+'px,'+(-dy*joystickRadius*.78)+'px)';
+ driveMode=joystickY>.06?'forward':'stop';
+ $('driveStatus').textContent=walkMode?'Drive: WALK INPUT':'Drive: '+(joystickY>.06?'FORWARD':joystickY<-.06?'BRAKE':'COAST');
 }
-bindHelm('port',-1);bindHelm('starboard',1);
+function releaseJoystick(){
+ joystickPointer=null;joystickX=0;joystickY=0;
+ joystickKnob.style.transform='translate(0,0)';
+ if(!walkMode)setDriveMode('stop');
+}
+joystick.addEventListener('pointerdown',e=>{e.preventDefault();e.stopPropagation();joystickPointer=e.pointerId;joystick.setPointerCapture(e.pointerId);updateJoystick(e);});
+joystick.addEventListener('pointermove',e=>{if(e.pointerId===joystickPointer){e.preventDefault();updateJoystick(e);}});
+for(const ev of ['pointerup','pointercancel','lostpointercapture'])joystick.addEventListener(ev,e=>{if(e.pointerId===joystickPointer)releaseJoystick();});
 const pressed=new Set();
+function updateKeyboardJoystick(){
+ const x=(pressed.has('ArrowRight')||pressed.has('KeyD')?1:0)-(pressed.has('ArrowLeft')||pressed.has('KeyA')?1:0);
+ const y=(pressed.has('ArrowUp')||pressed.has('KeyW')?1:0)-(pressed.has('ArrowDown')||pressed.has('KeyS')?1:0);
+ if(joystickPointer!==null)return;
+ joystickX=x;joystickY=y;
+ if(!walkMode)setDriveMode(y>0?'forward':'stop');
+}
 window.addEventListener('keydown',e=>{
- if(!['ArrowLeft','ArrowRight','ArrowUp','KeyA','KeyD','KeyW','KeyS','Space'].includes(e.code))return;
- if(e.target?.tagName==='INPUT')return;
- e.preventDefault();pressed.add(e.code);
- if(walkMode){walkLeft=pressed.has('ArrowLeft')||pressed.has('KeyA');walkRight=pressed.has('ArrowRight')||pressed.has('KeyD');walkForward=pressed.has('KeyW')||pressed.has('ArrowUp');}
- else{steeringLeft=pressed.has('ArrowLeft')||pressed.has('KeyA');steeringRight=pressed.has('ArrowRight')||pressed.has('KeyD');if(e.code==='KeyW')setDriveMode('forward');if(e.code==='KeyS'||e.code==='Space')setDriveMode('stop');}
+ if(!['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','KeyA','KeyD','KeyW','KeyS','Space'].includes(e.code)||e.target?.tagName==='INPUT')return;
+ e.preventDefault();pressed.add(e.code);if(e.code==='Space'){pressed.clear();}updateKeyboardJoystick();
 });
-window.addEventListener('keyup',e=>{
- pressed.delete(e.code);
- if(walkMode){walkLeft=pressed.has('ArrowLeft')||pressed.has('KeyA');walkRight=pressed.has('ArrowRight')||pressed.has('KeyD');walkForward=pressed.has('KeyW')||pressed.has('ArrowUp');}
- else{steeringLeft=pressed.has('ArrowLeft')||pressed.has('KeyA');steeringRight=pressed.has('ArrowRight')||pressed.has('KeyD');}
-});
-window.addEventListener('blur',()=>{pressed.clear();steeringLeft=false;steeringRight=false;walkForward=walkLeft=walkRight=false;});
+window.addEventListener('keyup',e=>{pressed.delete(e.code);updateKeyboardJoystick();});
+window.addEventListener('blur',()=>{pressed.clear();releaseJoystick();});
+
 // Third-person camera is independent from helm input. On mobile the
 // canvas captures gestures; UI buttons capture their own touch events.
 function resetCamera(){
@@ -8456,4 +8462,4 @@ begin().catch(error=>{
 });
 </script>
 </body></html>
-<!-- GitHub Pages redeploy trigger for Water Lab 28.9.3 -->
+<!-- GitHub Pages redeploy trigger for Water Lab 28.9.4 -->

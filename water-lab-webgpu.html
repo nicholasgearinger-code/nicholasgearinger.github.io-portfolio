@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.10.4 Original ocean startup loading</title>
+<title>Rift Water Lab · WebGPU 28.10.5 Original ocean startup loading</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -109,7 +109,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.10.4</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.10.5</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="islandWaypoint" style="display:flex;align-items:center;gap:9px;padding:7px 0;color:#c5f5e9;font-size:13px"><span id="islandArrow" style="display:inline-block;font-size:22px;line-height:1;transform-origin:center">↑</span><span id="islandDistance">Island · locating</span></div>
@@ -420,15 +420,17 @@ function createOceanMaterial(options){
   const thin=crest.mul(backlight).mul(float(1).sub(n.dot(sun).abs().clamp(0,1))).mul(oceanGlintControls.w.clamp(0,2)).mul(.16).mul(above);
   // Spectral extinction along the actual eye-to-interface ray, rather than camera depth alone.
   underwaterPathOptics=uniform(new THREE.Vector4(.19,.070,.040,.022));
-  const eyePath=viewDistance.mul(.75).min(150);
-  const eyeTransmission=underwaterPathOptics.xyz.mul(eyePath).negate().exp();
+  const eyePath=viewDistance.min(150);
+  const sigmaT=underwaterPathOptics.xyz.add(vec3(underwaterPathOptics.w));
+  const eyeTransmission=sigmaT.mul(eyePath).negate().exp();
   // Bounded two-lobe Henyey-Greenstein approximation. v points toward the eye;
   // incoming refracted sunlight travels downward, so looking up gives forward scattering.
   const mu=v.dot(vec3(-.326,-1,-.163).normalize()).clamp(-1,1);
   const forward=float(.64).div(float(1.36).sub(mu.mul(1.2)).max(.16).pow(1.5));
   const backward=float(.9375).div(float(1.0625).add(mu.mul(.5)).max(.5625).pow(1.5));
   const phase=forward.mul(.78).add(backward.mul(.22)).clamp(.25,3.2);
-  const opticalFog=vec3(.004,.025,.055).mul(float(1).sub(eyePath.mul(underwaterPathOptics.w).negate().exp())).mul(phase.mul(.45).add(.55));
+  const scatterAlbedo=vec3(underwaterPathOptics.w).div(sigmaT.max(vec3(.0001)));
+  const opticalFog=vec3(.045,.24,.39).mul(scatterAlbedo).mul(vec3(1).sub(eyeTransmission)).mul(phase.mul(.55).add(.45)).mul(oceanAngleDepth.mul(-.035).exp());
   const reflected=enhancedUnderwaterLight?radiance.mul(vec3(.12,.35,.58)).mul(eyeTransmission).add(opticalFog):radiance;
   // Separate underside lens field: broad curvature cells, evaluated directly
   // on the moving interface. No CPU texture, extra mesh or render pass.
@@ -1684,8 +1686,15 @@ function createUnderwaterReceiver(options){
    const solar=vec3(.72,.86,.94).mul(vec3(.085,.029,.014).mul(waterPath.negate()).exp()).mul(direct).mul(visibility).mul(solid).mul(.22);
    const grazing=float(1).sub(n.dot(v).abs().clamp(0,1)).pow(5);
    const reflected=down.mul(grazing.mul(.08).add(spec.mul(.45)));
-   const immersedLight=ambient.add(solar).mul(materialColor.rgb.mul(.85).add(vec3(.15))).add(reflected).mul(submerged);
-   mat.emissiveNode=materialEmissive.add(irradiance.mul(diffuse.mul(1.35).add(vec3(spec)))).add(immersedLight);
+   const receiverPath=oceanTSL.cameraPosition.sub(positionWorld).length().min(150);
+   const eyeWet=smoothstep(.02,.45,oceanTSL.cameraPosition.y.negate());
+   const extinction=vec3(.155,.058,.031).mul(u.controls.w.max(0)).add(vec3(.026)).div(u.controls.z.max(.4));
+   const transport=extinction.mul(receiverPath.negate()).exp();
+   const rayMix=eyeWet.mul(submerged);
+   const transmitted=vec3(1).sub(vec3(1).sub(transport).mul(rayMix));
+   const immersedLight=ambient.add(solar).mul(materialColor.rgb.mul(.85).add(vec3(.15))).add(reflected).mul(submerged).mul(transmitted);
+   mat.emissiveNode=materialEmissive.add(irradiance.mul(diffuse.mul(1.35).add(vec3(spec))).mul(transmitted)).add(immersedLight);
+   mat.colorNode=materialColor.rgb.mul(transmitted);
   }else mat.emissiveNode=materialEmissive.add(irradiance.mul(materialColor.rgb.mul(.40).add(vec3(.60))));
   mat.userData.projectedCaustics=true;return mat;
  }catch(e){mat?.dispose();console.warn('Projected object caustics fallback',e);return new THREE.MeshStandardMaterial(options);}
@@ -8563,4 +8572,4 @@ begin().catch(error=>{
 });
 </script>
 </body></html>
-<!-- GitHub Pages redeploy trigger for Water Lab 28.10.4 -->
+<!-- GitHub Pages redeploy trigger for Water Lab 28.10.5 -->

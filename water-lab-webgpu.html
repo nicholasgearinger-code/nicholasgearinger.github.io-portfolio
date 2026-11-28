@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.13.2 Smooth underwater optical reconstruction</title>
+<title>Rift Water Lab · WebGPU 28.13.3 Underwater contrast and focused light</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -109,7 +109,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.13.2</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.13.3</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="islandWaypoint" style="display:flex;align-items:center;gap:9px;padding:7px 0;color:#c5f5e9;font-size:13px"><span id="islandArrow" style="display:inline-block;font-size:22px;line-height:1;transform-origin:center">↑</span><span id="islandDistance">Island · locating</span></div>
@@ -517,7 +517,7 @@ function createOceanMaterial(options){
       hxx.addAssign(curve.mul(kx*kx));hzz.addAssign(curve.mul(kz*kz));hxz.addAssign(curve.mul(kx*kz));
      }
      // Recompute Fresnel and Snell transmission using the perturbed interface.
-     const localNormal=n.add(microNormal.sub(n).mul(.38)).add(vec3(dx.negate(),0,dz.negate()).mul(.23)).normalize();
+     const localNormal=n.add(microNormal.sub(n).mul(.48)).add(vec3(dx.negate(),0,dz.negate()).mul(.34)).normalize();
      const inwardFine=localNormal.dot(v).greaterThan(0).select(localNormal,localNormal.negate());
      const cosI=inwardFine.dot(v).clamp(0,1);
      const disc=float(1).sub(float(1).sub(cosI.mul(cosI)).mul(1.333*1.333));
@@ -549,12 +549,12 @@ function createOceanMaterial(options){
       const towardFloor=reflectedRay.y.negate().max(0);
       const floorPath=depth.div(towardFloor.max(.16)).min(80);
       const floorRadiance=vec3(.22,.36,.37).mul(underwaterPathOptics.xyz.mul(floorPath).negate().exp()).mul(towardFloor.pow(.45));
-      const reflectedEnvironment=vec3(.012,.065,.115).add(floorRadiance.mul(.8));
+      const reflectedEnvironment=vec3(.008,.035,.068).add(floorRadiance.mul(.65));
       // Broad sky luminance and soft circumsolar scattering are sampled
       // through Snell's window. No periodic brightness term.
       const skyY=skyRay.y.max(0);
       const sunDot=skyRay.dot(sun).max(0);
-      const daylight=vec3(.32,.57,.83).mul(skyY.pow(.65).mul(.72).add(.28));
+      const daylight=vec3(.32,.57,.83).mul(skyY.pow(.85).mul(.88).add(.12));
       const circumsolar=vec3(.98,.96,.86).mul(sunDot.pow(48).mul(.75).add(sunDot.pow(14).mul(.48)).add(sunDot.pow(5).mul(.12)));
       const refractedEnvironment=daylight.add(circumsolar).mul(transmissionFine);
       // Surface radiance is directional only. Curvature focusing belongs
@@ -1216,7 +1216,7 @@ function updateUnderwaterScattering(){
  const profile=waterProfiles[atmospherePreset]||waterProfiles.lagoon;
  const wet=underwaterActive?underwaterBlend:0;
  opticalSun=waterTransmittance(depth,(profile.absorption[1]+profile.scattering)*Math.max(0,depthAbsorption),waterClarity);
- if(mainSun)mainSun.intensity=3.5*(1-wet+wet*opticalSun*(1-.42*opticalAir));
+ if(mainSun)mainSun.intensity=3.5*(1-wet+wet*opticalSun*(1-.42*opticalAir)*.76);
  updateCausticLighting(depth);
  updateUnifiedVisibility(depth);
  updateUndersideOptics();
@@ -3006,7 +3006,7 @@ function setupContinuousFloor(mat,detail){
    const photonCore=photonPeak.pow(.82);
    const photonShoulder=photonPeak.pow(.48).mul(.20);
    const photonLight=vec3(.97,1,1).mul(photonCore.mul(2.65).add(photonShoulder));
-   const physicalMix=coverage.mul(smoothstep(.6,3.5,depth).mul(.34).add(.42));
+   const physicalMix=coverage.mul(smoothstep(.6,3.5,depth).mul(.42).add(.25));
    light=light.mul(float(1).sub(physicalMix)).add(photonLight.mul(physicalMix));
    mat.userData.floorPhotonValid=photonValid;
   }
@@ -3014,13 +3014,16 @@ function setupContinuousFloor(mat,detail){
   const grain=sandA.mul(.24).add(.76);
   const transmission=texture(waveTransmissionTexture,uv.clamp(.001,.999)).r;
   const shaded=float(1).sub(float(1).sub(transmission).mul(localMask).mul(shadow));
-  mat.colorNode=materialColor.rgb.mul(grain).mul(shaded);
+  const bedLight=vec3(.74,.84,.88).mul(depth.mul(-.035).exp());
+  mat.colorNode=materialColor.rgb.mul(grain).mul(shaded).mul(bedLight);
   // Classic mode retains the existing emissive map; wave mode replaces it.
   // Focused light must obey the same occlusion as diffuse sunlight.
   const spectralTint=vec3(.065,.022,.008).mul(opticalPath.sub(6).max(0).negate()).exp();
   // Contrast enhancement rather than a uniform increase in floor emission.
   const nearShore=float(1).sub(smoothstep(1.2,4,depth));
-  const focusedLight=light.max(vec3(0)).pow(1.12).mul(1.30).min(vec3(2.4));
+  // Redistribute broad illumination into elongated principal-curvature folds.
+  const shapeNear=tensorCausticResponse(float(1).sub(xx.mul(bend)),float(1).sub(zz.mul(bend)),xzCurvature.mul(bend),softDepth,eyeDistance);
+  const focusedLight=light.max(vec3(0)).mul(.48).add(vec3(.96,1,1).mul(shapeNear.radiance).mul(.75)).min(vec3(1.65));
   const shapedLight=light.mul(float(1).sub(nearShore)).add(focusedLight.mul(nearShore));
   const litCaustic=shapedLight.mul(float(1).sub(smoothstep(3,8,depth))).mul(spectralTint).mul(shaded.pow(.85)).mul(grain).mul(controls.y).mul(1.25).mul(solidLightVisibility(positionWorld));
   // Approximate added diffuse irradiance using receiver albedo and orientation.
@@ -8881,4 +8884,4 @@ begin().catch(error=>{
 });
 </script>
 </body></html>
-<!-- GitHub Pages redeploy trigger for Water Lab 28.13.2 -->
+<!-- GitHub Pages redeploy trigger for Water Lab 28.13.3 -->

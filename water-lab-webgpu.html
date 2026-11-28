@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.12.5 Stable heading-local buoyancy</title>
+<title>Rift Water Lab · WebGPU 28.12.6 Submerged-volume buoyancy</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -109,7 +109,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.12.5</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.12.6</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="islandWaypoint" style="display:flex;align-items:center;gap:9px;padding:7px 0;color:#c5f5e9;font-size:13px"><span id="islandArrow" style="display:inline-block;font-size:22px;line-height:1;transform-origin:center">↑</span><span id="islandDistance">Island · locating</span></div>
@@ -7527,7 +7527,20 @@ const hullSamples=[
 let boatProbeOffset=null;
 let hullSlipX=0,hullSlipZ=0,hullFluidLoad=0,hullYawRate=0,hullWet=0,hullSlamming=0,hullContact=0;const hullFlowSample={};
 // Weighted waterplane strips approximate a tapered hull (bow at negative Z).
-const hydroProbes=[];for(const [z,width] of [[-2.05,.37],[-1.35,.73],[-.5,.92],[.45,.94],[1.35,.87],[2,.69]])for(const side of [-1,0,1])hydroProbes.push([side*width*.82,side===0?-.29:-.18,z,width*(side===0?.50:.25)]);
+// Integrate displaced volume over longitudinal strips with three lateral quadrature samples.
+const hydroProbes=[];
+for(const [z,length] of [[-2.27,.76],[-1.50,.78],[-.66,.90],[.24,.90],[1.14,.90],[1.895,.61]]){
+ const width=hullHalfBeam(z),keel=hullKeel(z);
+ for(const side of [-1,0,1]){
+  const weight=side===0?4/9:5/18;
+  hydroProbes.push([side*width*Math.sqrt(3/5),keel,z,2*width*length*weight]);
+ }
+}
+function hullColumnVolume(area,depth,z){
+ const height=.35-hullKeel(z),d=Math.max(0,Math.min(height,depth));
+ // Integral of the tapered cross-section width from keel to waterline.
+ return area*(.80*d+(.20*2/3)*d*Math.sqrt(d/height));
+}
 const hydroArea=hydroProbes.reduce((a,p)=>a+p[3],0);
 function stepBoatClassic(dt,t){
  if(!boat||dt<=0)return;
@@ -7645,7 +7658,7 @@ function stepBoat(dt,t){
    const surface=exterior+Math.max(breaker.height*.65,Math.min(.18,reconstructedHeight)),depth=surface-y;
    exteriorSum+=surface*p[3];exteriorWeight+=p[3];
    if(!Number.isFinite(depth)||depth<=0)continue;
-   const area=4.5*p[3]/hydroArea,sub=Math.min(.58,depth),fraction=Math.min(1,depth/.22);
+   const area=p[3],volume=hullColumnVolume(area,depth,p[2]),fraction=Math.min(1,depth/.18);
    wet+=p[3]*fraction;
    const ok=breakingMode==='advanced'&&sampleFluid3(x,y,z,hullFlowSample);
    const ux=(ok?hullFlowSample.x:0)+breaker.x,uz=(ok?hullFlowSample.z:0)+breaker.z;
@@ -7654,12 +7667,12 @@ function stepBoat(dt,t){
    const localX=rx*ox+rz*oz,localZ=-(fx*ox+fz*oz);
    const localV=vy+rollV*localX-pitchV*localZ;
    const relY=localV-Math.max(-2.5,Math.min(2.5,uy));
-   const buoy=1000*9.81*area*sub*buoyancyStrength;
+   const buoy=1000*9.81*volume*buoyancyStrength;
    // Resist relative heave without generating a large rebound impulse.
-   const damp=-area*1450*Math.max(.65,rideDamping)*relY*fraction;
+   const damp=-area*850*Math.max(.65,rideDamping)*relY*fraction;
    const impact=area*45*Math.min(2.25,Math.max(0,-relY)**2)*fraction;
    if(depth<.20&&relY<-.65){const a=area*fraction;entryX+=x*a;entryZ+=z*a;entryArea+=a;entrySpeed=Math.max(entrySpeed,-relY);}
-   const force=Math.max(-buoy*.32,Math.min(buoy*2.1+area*220,buoy+damp+impact));
+   const force=Math.max(0,Math.min(buoy*2.0+area*160,buoy+damp+impact));
    fy+=force;tx-=localZ*force;tz+=localX*force;slam+=impact;
    const relX=vx+hullYawRate*oz-ux,relZ=vz-hullYawRate*ox-uz;
    const along=relX*fx+relZ*fz,side=relX*rx+relZ*rz;
@@ -7710,19 +7723,19 @@ function stepBoat(dt,t){
   const clearance=boat.position.y-hullRideReference;
   const relativeHeave=vy-hullRideRate;
   // Progressive reserve support and rebound damping, relative to moving sea.
-  const low=Math.max(0,-.13-clearance),high=Math.max(0,clearance-.19);
-  fy+=mass*(Math.min(15,low*42)-Math.min(12,high*30)-Math.max(-8,Math.min(8,relativeHeave*3.8)));
+  const low=Math.max(0,-.38-clearance),high=Math.max(0,clearance-.52);
+  fy+=mass*(Math.min(12,low*24)-Math.min(8,high*16)-Math.max(-3,Math.min(3,relativeHeave*.7))*hullContact);
   if(low>0){tx-=pitchV*Ix*2;tz-=rollV*Iz*2;}
   const effectiveHeaveMass=mass*(1+.65*hullContact);
-  vy=Math.max(hullRideRate-1.6,Math.min(hullRideRate+1.25,vy+h*Math.max(-14,Math.min(14,fy/effectiveHeaveMass))));
+  vy=Math.max(-3.5,Math.min(3.5,vy+h*Math.max(-12,Math.min(12,fy/effectiveHeaveMass))));
   pitchV=Math.max(-1.1,Math.min(1.1,pitchV+tx/Ix*h));
   rollV=Math.max(-1.1,Math.min(1.1,rollV+tz/Iz*h));
   boat.position.y+=vy*h;
   // Last-resort ride envelope prevents numerical launch or deep sinking.
   // Ordinary wave motion remains force-driven within these limits.
-  const lowerRide=hullRideReference-.32,upperRide=hullRideReference+.38;
-  if(boat.position.y<lowerRide){boat.position.y=lowerRide;vy=Math.max(vy,hullRideRate);}
-  if(boat.position.y>upperRide){boat.position.y=upperRide;vy=Math.min(vy,hullRideRate);}
+  const lowerRide=hullRideReference-.75,upperRide=hullRideReference+.95;
+  if(boat.position.y<lowerRide){boat.position.y=lowerRide;vy=Math.max(vy,0);}
+  if(boat.position.y>upperRide){boat.position.y=upperRide;vy=Math.min(vy,0);}
   boat.rotation.y=boatHeading;
   boat.rotation.x=Math.max(-.30,Math.min(.30,boat.rotation.x+pitchV*h));
   boat.rotation.z=Math.max(-.27,Math.min(.27,boat.rotation.z+rollV*h));
@@ -8763,4 +8776,4 @@ begin().catch(error=>{
 });
 </script>
 </body></html>
-<!-- GitHub Pages redeploy trigger for Water Lab 28.12.5 -->
+<!-- GitHub Pages redeploy trigger for Water Lab 28.12.6 -->

@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.10.1 Original ocean startup loading</title>
+<title>Rift Water Lab · WebGPU 28.10.2 Original ocean startup loading</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -109,7 +109,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.10.1</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.10.2</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="islandWaypoint" style="display:flex;align-items:center;gap:9px;padding:7px 0;color:#c5f5e9;font-size:13px"><span id="islandArrow" style="display:inline-block;font-size:22px;line-height:1;transform-origin:center">↑</span><span id="islandDistance">Island · locating</span></div>
@@ -505,7 +505,7 @@ function createOceanMaterial(options){
       hxx.addAssign(curve.mul(kx*kx));hzz.addAssign(curve.mul(kz*kz));hxz.addAssign(curve.mul(kx*kz));
      }
      // Recompute Fresnel and Snell transmission using the perturbed interface.
-     const localNormal=n.add(vec3(dx.negate(),0,dz.negate())).normalize();
+     const localNormal=microNormal.add(vec3(dx.negate(),0,dz.negate()).mul(.48)).normalize();
      const inwardFine=localNormal.dot(v).greaterThan(0).select(localNormal,localNormal.negate());
      const cosI=inwardFine.dot(v).clamp(0,1);
      const disc=float(1).sub(float(1).sub(cosI.mul(cosI)).mul(1.333*1.333));
@@ -542,19 +542,14 @@ function createOceanMaterial(options){
       // through Snell's window. No periodic brightness term.
       const skyY=skyRay.y.max(0);
       const sunDot=skyRay.dot(sun).max(0);
-      const daylight=vec3(.28,.54,.79).mul(skyY.mul(.52).add(.48));
+      const daylight=vec3(.28,.54,.79).mul(skyY.pow(.65).mul(.72).add(.28));
       const circumsolar=vec3(.98,.96,.86).mul(sunDot.pow(24).mul(.70).add(sunDot.pow(5).mul(.16)));
       const refractedEnvironment=daylight.add(circumsolar).mul(transmissionFine);
-      // Use the finite-width lens only as a restrained modulation of the
-      // incoming sky, rather than an independent emissive pattern.
-      const lensMod=focal.mul(.12).add(soft.mul(.06)).add(1);
-      const interfaceLight=reflectedEnvironment.mul(reflectFine).add(refractedEnvironment.mul(lensMod));
+      // Surface radiance is directional only. Curvature focusing belongs
+      // on receiving surfaces, not on the visible water interface.
+      const interfaceLight=reflectedEnvironment.mul(reflectFine).add(refractedEnvironment);
       const active=upward.mul(wet).mul(depthFade).mul(undersideLensControls.z).mul(undersideLensControls.w);
-      // Restore the previous fine lens appearance, retaining only a small
-      // directional radiance contribution. Avoid a broad bright sky wash.
-      const previous=blueBase.add(oldLight.mul(.32).add(refined.mul(.68)).mul(upward).mul(wet).mul(depthFade).mul(undersideLensControls.z)).mul(undersideLensControls.w);
-      const directional=interfaceLight.mul(eyeTransmission).mul(active);
-      result.assign(previous.mul(.48).add(directional.mul(.38)));
+      result.assign(blueBase.add(interfaceLight.mul(eyeTransmission).mul(active).mul(.78)));
      }else result.assign(blueBase.add(oldLight.mul(.58).add(refined.mul(.85)).mul(upward).mul(wet).mul(depthFade).mul(undersideLensControls.z)).mul(undersideLensControls.w));
     }else result.assign(blueBase.add(spectral.mul(illumination).add(incoming).mul(upward).mul(wet).mul(depthFade).mul(undersideLensControls.z)).mul(undersideLensControls.w));
    });
@@ -8549,4 +8544,4 @@ begin().catch(error=>{
 });
 </script>
 </body></html>
-<!-- GitHub Pages redeploy trigger for Water Lab 28.10.1 -->
+<!-- GitHub Pages redeploy trigger for Water Lab 28.10.2 -->

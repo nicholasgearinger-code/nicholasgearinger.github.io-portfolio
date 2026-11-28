@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.11.5 Breaking-wave aeration</title>
+<title>Rift Water Lab · WebGPU 28.12.0 Breaking-wave hull coupling</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -109,7 +109,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.11.5</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.12.0</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="islandWaypoint" style="display:flex;align-items:center;gap:9px;padding:7px 0;color:#c5f5e9;font-size:13px"><span id="islandArrow" style="display:inline-block;font-size:22px;line-height:1;transform-origin:center">↑</span><span id="islandDistance">Island · locating</span></div>
@@ -5820,6 +5820,28 @@ function crestFold(along,side,p,out){
  return true;
 }
 const crestOffset={forward:0,up:0};
+const breakerHullScratch={x:0,y:0,z:0,height:0};
+function sampleBreakerHull(x,z,t,out){
+ out.x=out.y=out.z=out.height=0;
+ for(const p of plungePool){
+  const dx=x-p.x,dz=z-p.z,along=dx*p.fx+dz*p.fz,side=dx*p.fz-dz*p.fx;
+  const a=p.age/p.life,L=Math.max(1.25,p.height*1.8);
+  if(Math.abs(side)>=p.width*.5||Math.abs(along)>L+2)continue;
+  const span=Math.max(0,1-(side/(p.width*.5))**2);
+  const lip=-.16*L;
+  if(!crestFold(lip,side,p,breakerFoldScratch))continue;
+  const front=lip+breakerFoldScratch.forward;
+  const envelope=Math.exp(-((along-front)**2)/(.55+p.height*.6))*span*span;
+  const active=crestFoamPhase(a),collapse=Math.max(0,1-Math.abs(a-.73)/.24);
+  out.height+=breakerFoldScratch.up*envelope*.42;
+  const momentum=p.speed*envelope*active*(.22+.38*collapse);
+  out.x+=p.fx*momentum;out.z+=p.fz*momentum;
+  out.y+=envelope*p.height*(a<.65?.55:-.65)*active;
+ }
+ out.height=Math.min(.55,out.height);
+ return out;
+}
+const breakerFoldScratch={forward:0,up:0};
 let crestVertices=0;
 function clearPlunges(){plungePool.length=0;plungeClock=0;plungeImpacts=0;crestVertices=0;crestFoamCount=0;}
 // Shared whitewater source: moving folded crest, impact, residual transport.
@@ -5878,7 +5900,9 @@ function updatePlunges(dt,t){
    const x=boat.position.x+Math.cos(a)*r,z=boat.position.z+Math.sin(a)*r;
    if(plungePool.some(p=>Math.hypot(p.x-x,p.z-z)<6))continue;
    const w=waveField(x,z,t,{}),slope=Math.hypot(w.slopeX,w.slopeZ);
-   const score=(w.compression*.85+slope*.28)*Math.max(0,Math.min(1,(w.height+.35)/1.1))*breakingIntensity;
+   const localDepth=seabedDepth(x,z);if(localDepth<.22)continue;
+   const shoal=Math.max(0,Math.min(1,(Math.max(0,w.height)*2/Math.max(.3,localDepth)-.42)/.36));
+   const score=(w.compression*.85+slope*.28+shoal*.22)*Math.max(0,Math.min(1,(w.height+.35)/1.1))*breakingIntensity;
    if(score>bestScore){bestScore=score;best={x,z,score};}
   }
   if(best){
@@ -5890,13 +5914,20 @@ function updatePlunges(dt,t){
  for(let i=plungePool.length-1;i>=0;i--){
   const p=plungePool[i];p.age+=dt;const a=p.age/p.life;
   if(a>=1||Math.hypot(p.x-boat.position.x,p.z-boat.position.z)>13){plungePool.splice(i,1);continue;}
-  p.x+=p.fx*p.speed*dt;p.z+=p.fz*p.speed*dt;
+  const waterColumn=Math.max(.2,seabedDepth(p.x,p.z));
+  const travelSpeed=Math.min(p.speed,Math.sqrt(9.81*waterColumn));
+  p.x+=p.fx*travelSpeed*dt;p.z+=p.fz*travelSpeed*dt;
+  if(waterColumn<.28){plungePool.splice(i,1);continue;}
   emitCrestParcels(p,t);
   // Approximate collapse impulse; a reconstructed liquid surface is needed for exact contact.
   if(!p.hit&&a>.69){
    p.hit=true;plungeImpacts++;
    for(let k=-1;k<=1;k++){
-    const x=p.x+p.fx*p.height+p.fz*k*p.width*.22,z=p.z+p.fz*p.height-p.fx*k*p.width*.22;
+    const side=k*p.width*.22,root=-.16*Math.max(1.25,p.height*1.8);
+    crestFold(root,side,p,breakerFoldScratch);
+    const landing=root+breakerFoldScratch.forward+travelSpeed*.12;
+    const x=p.x+p.fx*landing+p.fz*side,z=p.z+p.fz*landing-p.fx*side;
+    if(seabedDepth(x,z)<.18)continue;
     const e={x,z,energy:Math.min(.7,p.height*.4),age:0,fx:p.fx,fz:p.fz,plunge:true};
     entryEvents.push(e);entryAirQueue.push({...e});emitPlungeBubbles(e,t);spawnFoamParcel(x,z,Math.min(1,e.energy*1.8)*foamStrength,p.fx*p.speed*.35,p.fz*p.speed*.35);for(let n=0;n<4;n++)emitWhitewater(x,z,t,e.energy*1.8,p.fx,p.fz);
    }
@@ -7567,14 +7598,15 @@ function stepBoat(dt,t){
    const left=oceanHeight(boat.position.x+Math.cos(boatHeading)*beam+ox-(Math.cos(boatHeading)*p[0]),boat.position.z-Math.sin(boatHeading)*beam+oz+Math.sin(boatHeading)*p[0],t+k*h);
    const right=oceanHeight(boat.position.x-Math.cos(boatHeading)*beam+ox-Math.cos(boatHeading)*p[0],boat.position.z+Math.sin(boatHeading)*beam+oz+Math.sin(boatHeading)*p[0],t+k*h);
    const exterior=probeSide>0?left:probeSide<0?right:(left+right)*.5;
-   const surface=exterior,depth=surface-y;
-   exteriorSum+=exterior*p[3];exteriorWeight+=p[3];
+   const breaker=sampleBreakerHull(x,z,t+k*h,breakerHullScratch);
+   const surface=exterior+breaker.height,depth=surface-y;
+   exteriorSum+=surface*p[3];exteriorWeight+=p[3];
    if(!Number.isFinite(depth)||depth<=0)continue;
    const area=4.5*p[3]/hydroArea,sub=Math.min(.85,depth),fraction=Math.min(1,depth/.22);
    wet+=p[3]*fraction;
    const ok=breakingMode==='advanced'&&sampleFluid3(x,y,z,hullFlowSample);
-   const ux=ok?hullFlowSample.x:0,uz=ok?hullFlowSample.z:0;
-   const uy=(ok?hullFlowSample.y*.30:0)+(wakeSolver?.sampleVelocity(x,z)||0)*.22;
+   const ux=(ok?hullFlowSample.x:0)+breaker.x,uz=(ok?hullFlowSample.z:0)+breaker.z;
+   const uy=(ok?hullFlowSample.y*.30:0)+(wakeSolver?.sampleVelocity(x,z)||0)*.22+breaker.y;
    const localV=vy+rollV*ox-pitchV*oz;
    const relY=localV-Math.max(-2.5,Math.min(2.5,uy));
    const buoy=1000*9.81*area*sub*buoyancyStrength;
@@ -8683,4 +8715,4 @@ begin().catch(error=>{
 });
 </script>
 </body></html>
-<!-- GitHub Pages redeploy trigger for Water Lab 28.11.5 -->
+<!-- GitHub Pages redeploy trigger for Water Lab 28.12.0 -->

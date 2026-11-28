@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.9.0 Walkable beach</title>
+<title>Rift Water Lab · WebGPU 28.9.1 Natural shoreline physics</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.9.0</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.9.1</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="frameProfile" style="font-size:11px;line-height:1.4;color:#b5e4e8;margin:4px 0" role="status">Frame profiler: collecting</div>
@@ -1343,22 +1343,34 @@ function chooseOptics(mode){
  $('opticsFallback').textContent=mode==='legacy'?'Safe mode active':'Safe water mode';
 }
 function seabedDepth(x,z){
- // Broad offshore basin, retained as the deep-water baseline.
+ // Deep basin remains unchanged offshore.
  const distance=Math.hypot(x*.83,(z+11)*.92);
  const t=Math.max(0,Math.min(1,(distance-16)/95));
  const basin=3.8+27*(t*t*(3-2*t));
- // A continuous submerged beach shelf follows the actual island coast.
- // It eases from ankle-deep water at the waterline into the existing basin.
- const coast=islandCoastZ(x);
- const shoreDistance=Math.abs(z-coast);
- const shoreT=Math.max(0,Math.min(1,shoreDistance/25));
- const shoreEase=shoreT*shoreT*(3-2*shoreT);
- const shelfDepth=.22+5.1*shoreEase;
+ // The beach occupies coast+.18 through coast+20.18. The submerged
+ // shelf begins at its seaward edge and deepens only on the ocean side.
+ const coast=islandCoastZ(x),waterline=coast+20.18;
+ const offshore=Math.max(0,z-waterline);
+ const shelfT=Math.max(0,Math.min(1,offshore/27));
+ const shelfEase=shelfT*shelfT*(3-2*shelfT);
+ const shelfDepth=.16+5.6*shelfEase;
  const coastWidth=Math.max(0,Math.min(1,(65-Math.abs(x))/9));
  const shelfMask=coastWidth*coastWidth*(3-2*coastWidth);
  const depth=basin+(Math.min(basin,shelfDepth)-basin)*shelfMask;
- const rippled=depth+.10*Math.sin(x*.085+z*.041)*Math.cos(z*.072-x*.028);
- return Math.max(.16,rippled);
+ const ripple=.025*Math.sin(x*.085+z*.041)*Math.cos(z*.072-x*.028);
+ return Math.max(.12,depth+ripple);
+}
+function beachSurfaceHeight(x,z){
+ const coast=islandCoastZ(x),v=Math.max(0,Math.min(1,(z-(coast+.18))/20));
+ return .30-.275*v+.012*Math.sin(x*.17+v*4)*Math.sin(z*.13);
+}
+function shorelineWaveFactor(x,z){
+ if(Math.abs(x)>66)return 1;
+ const coast=islandCoastZ(x),offset=z-(coast+20.18);
+ if(offset<0)return .12;
+ const d=seabedDepth(x,z),t=Math.max(0,Math.min(1,(d-.16)/3.8));
+ const smooth=t*t*(3-2*t);
+ return .12+.88*smooth;
 }
 // Test subjects reveal actual water transmission/attenuation. Parent to
 // seafloor so all local geometry follows the same translated floor tile.
@@ -2964,11 +2976,11 @@ function createTropicalShoreline(){
  };
  const sandMat=new THREE.MeshStandardMaterial({color:0xffffff,vertexColors:true,roughness:.92,metalness:0});
  const sand=new THREE.Color(0xf1dfb8),warm=new THREE.Color(0xe8d1a7);
- buildBand(.18,20,(x,v,z)=>.30+v*2.35+.045*Math.sin(x*.17+v*4)*Math.sin(z*.13),
+ buildBand(.18,20,(x,v,z)=>.30-.275*v+.012*Math.sin(x*.17+v*4)*Math.sin(z*.13),
   (x,v)=>sand.clone().lerp(warm,Math.max(0,Math.min(.32,.12+.12*Math.sin(x*.11+v*8)))),sandMat);
  const wetMat=new THREE.MeshStandardMaterial({color:0xffffff,vertexColors:true,roughness:.27,metalness:.03});
  const wetA=new THREE.Color(0x9b9b7d),wetB=new THREE.Color(0xc3b38d);
- buildBand(-.08,.72,(x,v)=>.025+v*.045,
+ buildBand(18.9,20.35,(x,v)=>.018+v*.018,
   (x,v)=>wetA.clone().lerp(wetB,v*.65).multiplyScalar(.88+.08*Math.sin(x*.32)),wetMat);
  const n=512,data=new Uint8Array(n*64*4);
  for(let y=0;y<64;y++)for(let x=0;x<n;x++){
@@ -2982,7 +2994,7 @@ function createTropicalShoreline(){
  shorelineFoamTexture.minFilter=THREE.LinearMipmapLinearFilter;shorelineFoamTexture.magFilter=THREE.LinearFilter;
  shorelineFoamTexture.generateMipmaps=true;shorelineFoamTexture.needsUpdate=true;
  shorelineFoamMaterial=new THREE.MeshBasicMaterial({map:shorelineFoamTexture,transparent:true,opacity:.78,depthWrite:false,side:THREE.DoubleSide});
- buildBand(-.10,.42,(x,v)=>.075+v*.025,
+ buildBand(19.65,20.75,(x,v)=>.045+v*.012,
   ()=>new THREE.Color(0xffffff),shorelineFoamMaterial);
  createIslandLandmass();
 }
@@ -3297,10 +3309,11 @@ function waveField(x,z,t,out=waveState){
  const hasFFT=fftMix>.0005&&gpuFFT?.ready&&!fftFault&&Number.isFinite(gpuFFT.rms);
  const analyticWeight=1-(hasFFT?fftMix*(waveEngine==='fft'?.80:.30):0);
  const harmonic=crestAsymmetry*.095, chopScale=1+crestAsymmetry*.12;
+ const shoreAttenuation=shorelineWaveFactor(x,z);
  const advanced=breakingMode==='advanced',curlEnabled=advanced&&breakingIntensity>.01;
  for(const wave of waveComponents){
   const phase=wave.kx*x+wave.kz*z-wave.omega*t+wave.phase;
-  const amplitude=waveHeight*wave.amplitude*analyticWeight;
+  const amplitude=waveHeight*wave.amplitude*analyticWeight*shoreAttenuation;
   const sinPhase=Math.sin(phase),cosPhase=Math.cos(phase);
   // A second harmonic narrows crests and broadens troughs; its exact
   // derivative keeps boat probes and rendered normals consistent.
@@ -3329,7 +3342,7 @@ function waveField(x,z,t,out=waveState){
   steepness+=Math.abs(a*wave.kz*derivative)+Math.abs(a*wave.kx*derivative);
  }
  if(hasFFT){
-  const scale=fftEnergy*waveHeight*fftMix;
+  const scale=fftEnergy*waveHeight*fftMix*shoreAttenuation;
   const value=gpuFFT.sample(x,z);
   if(Number.isFinite(value))elevation+=value*scale;
   // Use spectral height gradients to displace wave crests laterally.
@@ -3411,7 +3424,8 @@ function oceanHeight(x,z,t){
   }
  }
  const y=waveField(bx,bz,t).height;
- const result=y+(boat?oceanWakeOffset(x,z):0);
+ const depth=seabedDepth(x,z),wakeFade=Math.max(0,Math.min(1,depth/1.8));
+ const result=y+(boat?oceanWakeOffset(x,z)*wakeFade:0);
  return Number.isFinite(result)?result:0;
 }
 // Both patches are re-centered on the player and use the same long waves.
@@ -7029,15 +7043,24 @@ function animateWaves(t){
   const x=px+cx,z=pz+cz;
   if(offshoreGPU?.mask[i/3]){if(offshoreTint){const w=waveField(x,z,t);oceanSpectralTint(x,z,w.height,w.slopeX,w.slopeZ,nearColorData,i);}deformationWeights[i/3]=0;continue;}
   const wave=waveField(x,z,t);
-  const coast=islandCoastZ(x),onLand=x>=-65&&x<=65&&z<coast+20.25;
+  const coast=islandCoastZ(x),shoreX=Math.abs(x)<=65;
+  const landward=shoreX&&z<coast+.18;
+  const beach=shoreX&&z>=coast+.18&&z<=coast+20.18;
+  const ground=beach?beachSurfaceHeight(x,z):.24;
   const wx=x+wave.dx,wz=z+wave.dz;
   const fade=oceanFieldSupport(wx,wz,36,4);
   if(fade<=0){arr[i]=px+wave.dx;arr[i+1]=wave.height;arr[i+2]=pz+wave.dz;smoothWaterNormal(nearNormals,i,wave.slopeX,wave.slopeZ);oceanSpectralTint(x,z,wave.height,wave.slopeX,wave.slopeZ,nearColorData,i);deformationWeights[i/3]=0;continue;}
   const disturbance=oceanWakeOffset(wx,wz);
   arr[i]=px+wave.dx;arr[i+2]=pz+wave.dz;
-  if(onLand){arr[i+1]=-8;deformationWeights[i/3]=0;smoothWaterNormal(nearNormals,i,0,0);oceanSpectralTint(x,z,0,0,0,nearColorData,i);continue;}
   const liquidLift=rcSurfaceOffset(wx,wz);
-  arr[i+1]=wave.height+disturbance+liquidLift;
+  const waterY=wave.height+disturbance+liquidLift;
+  // Dry ground occludes the ocean mesh; the outer wet-sand edge remains
+  // water-covered so small waves can wash onto the beach naturally.
+  if(landward||(beach&&ground>waterY+.012)){
+   arr[i+1]=-8;deformationWeights[i/3]=0;smoothWaterNormal(nearNormals,i,0,0);
+   oceanSpectralTint(x,z,0,0,0,nearColorData,i);continue;
+  }
+  arr[i+1]=waterY;
   if(liquidLift>.002)crestVertices++;
   const folded=plungePool.length&&deformConnectedCrest(x,z,arr,i,fade);if(folded)crestVertices++;
   const clipped=hullClipSurface(arr,i,cx,cz);if(clipped)hullClipCount++;
@@ -7130,8 +7153,7 @@ function makeWalkCharacter(){
  player.name='Beach explorer';scene.add(player);
 }
 function beachGround(x,z){
- const coast=islandCoastZ(x),v=Math.max(0,Math.min(1,(z-coast-.18)/20));
- return .30+v*2.35+.045*Math.sin(x*.17+v*4)*Math.sin(z*.13);
+ return beachSurfaceHeight(x,z);
 }
 function setWalkMode(enabled){
  if(!player||!boat)return;
@@ -8385,4 +8407,4 @@ begin().catch(error=>{
 });
 </script>
 </body></html>
-<!-- GitHub Pages redeploy trigger for Water Lab 28.9.0 -->
+<!-- GitHub Pages redeploy trigger for Water Lab 28.9.1 -->

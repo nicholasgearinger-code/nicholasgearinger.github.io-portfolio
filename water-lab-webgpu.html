@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.12.6 Submerged-volume buoyancy</title>
+<title>Rift Water Lab · WebGPU 28.12.7 Mass distribution and orbital flow</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -109,7 +109,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.12.6</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.12.7</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="islandWaypoint" style="display:flex;align-items:center;gap:9px;padding:7px 0;color:#c5f5e9;font-size:13px"><span id="islandArrow" style="display:inline-block;font-size:22px;line-height:1;transform-origin:center">↑</span><span id="islandDistance">Island · locating</span></div>
@@ -7632,7 +7632,11 @@ function stepBoat(dt,t){
  if(!boat||dt<=0)return;
  if(!boatProbeOffset)boatProbeOffset=new THREE.Vector3();
  const steps=Math.max(1,Math.min(6,Math.ceil(dt/.008))),h=dt/steps;
- const mass=520+Math.min(24,Math.max(0,deckMass)),Ix=mass*2.35,Iz=mass*.65,Iy=mass*2.1;
+ // Approximate mass distribution: hull, low ballast, rig and central payload.
+ const flood=Math.min(24,Math.max(0,deckMass)),mass=520+flood;
+ const cgY=(230*.02+150*(-.16)+45*.95+95*.12+flood*.38)/mass;
+ const cgZ=(230*.12+150*.34+45*(-.12)+95*.10)/mass;
+ const Ix=mass*1.95,Iz=mass*.48,Iy=mass*2.05;
  // Added water mass increases heave inertia only while immersed.
  const desired=-joystickX;
  rudder+=(desired-rudder)*(1-Math.exp(-dt*3.8));
@@ -7643,6 +7647,10 @@ function stepBoat(dt,t){
   let fy=-mass*9.81,tx=0,tz=0,forceX=0,forceZ=0,yaw=0,wet=0,load=0,slam=0;
   let entryX=0,entryZ=0,entryArea=0,entrySpeed=0,exteriorSum=0,exteriorWeight=0;
   const q=boat.quaternion;
+  // Gravity acts through the mass center, expressed in heading-local axes.
+  boatProbeOffset.set(0,cgY,cgZ).applyQuaternion(q);
+  tx+=mass*9.81*(-fx*boatProbeOffset.x-fz*boatProbeOffset.z);
+  tz-=mass*9.81*(rx*boatProbeOffset.x+rz*boatProbeOffset.z);
   for(const p of hydroProbes){
    boatProbeOffset.set(p[0],p[1],p[2]).applyQuaternion(q);
    const ox=boatProbeOffset.x,oy=boatProbeOffset.y,oz=boatProbeOffset.z;
@@ -7661,15 +7669,29 @@ function stepBoat(dt,t){
    const area=p[3],volume=hullColumnVolume(area,depth,p[2]),fraction=Math.min(1,depth/.18);
    wet+=p[3]*fraction;
    const ok=breakingMode==='advanced'&&sampleFluid3(x,y,z,hullFlowSample);
-   const ux=(ok?hullFlowSample.x:0)+breaker.x,uz=(ok?hullFlowSample.z:0)+breaker.z;
-   const uy=(ok?hullFlowSample.y*.30:0)+(wakeSolver?.sampleVelocity(x,z)||0)*.22+breaker.y;
+   // The spectral background carries orbital flow even outside the local fluid grid.
+   // Use the analytic swell components, attenuated with submergence; blend
+   // with the local solver rather than summing two full velocity fields.
+   let orbitalX=0,orbitalY=0,orbitalZ=0;
+   const shore=shorelineWaveFactor(x,z);
+   const fftWeight=1-(fftMix>.0005&&gpuFFT?.ready&&!fftFault&&Number.isFinite(gpuFFT.rms)?fftMix*(waveEngine==='fft'?.80:.30):0);
+   for(const w of waveComponents){
+    const wn=Math.hypot(w.kx,w.kz),phase=w.kx*x+w.kz*z-w.omega*(t+k*h)+w.phase;
+    const amplitude=waveHeight*w.amplitude*shore*fftWeight*(w.dirX<-.48?crossingSwell:1);
+    const speed=amplitude*w.omega*Math.exp(-wn*Math.min(.65,depth));
+    orbitalX+=w.dirX*speed*Math.sin(phase);orbitalZ+=w.dirZ*speed*Math.sin(phase);
+    orbitalY-=speed*Math.cos(phase);
+   }
+   const ux=orbitalX*(ok?.35:1)+(ok?hullFlowSample.x*.65:0)+breaker.x*.65;
+   const uz=orbitalZ*(ok?.35:1)+(ok?hullFlowSample.z*.65:0)+breaker.z*.65;
+   const uy=orbitalY*.75+(ok?hullFlowSample.y*.25:0)+(wakeSolver?.sampleVelocity(x,z)||0)*.15+breaker.y*.65;
    // Resolve angular velocity and buoyancy torque in the heading-local frame.
    const localX=rx*ox+rz*oz,localZ=-(fx*ox+fz*oz);
    const localV=vy+rollV*localX-pitchV*localZ;
    const relY=localV-Math.max(-2.5,Math.min(2.5,uy));
    const buoy=1000*9.81*volume*buoyancyStrength;
    // Resist relative heave without generating a large rebound impulse.
-   const damp=-area*850*Math.max(.65,rideDamping)*relY*fraction;
+   const damp=-area*650*Math.max(.65,rideDamping)*relY*fraction;
    const impact=area*45*Math.min(2.25,Math.max(0,-relY)**2)*fraction;
    if(depth<.20&&relY<-.65){const a=area*fraction;entryX+=x*a;entryZ+=z*a;entryArea+=a;entrySpeed=Math.max(entrySpeed,-relY);}
    const force=Math.max(0,Math.min(buoy*2.0+area*160,buoy+damp+impact));
@@ -7695,11 +7717,13 @@ function stepBoat(dt,t){
   const thrust=forward?throttle*mass*sailPower*(powered?8.2:3.0*(.35+.65*Math.abs(Math.cos(boatHeading+.7)))):0;
   forceX+=fx*thrust*hullContact;forceZ+=fz*thrust*hullContact;
   const steer=rudder;
-  yaw+=Iy*(steer*(1.65/(1+.12*boatSpeed))-hullYawRate)*5;
+  const steerAuthority=hullContact*(.28+.72*Math.min(1,boatSpeed/2.5));
+  yaw+=Iy*(steer*steerAuthority*(1.65/(1+.12*boatSpeed))-hullYawRate)*(hullContact>.02?3.2:.12);
   // Lift acts under the stern, only while wetted.
   const lift=mass*9.81*Math.min(powered?.13:.055,Math.max(0,boatSpeed-3.5)*.018)*hullWet;
   fy+=lift;tx-=lift*.20;
-  const accelF=(forceX*fx+forceZ*fz)/mass-(forward?0:Math.min(boatSpeed/h,1.4)*hullContact);
+  const braking=Math.max(0,-joystickY);
+  const accelF=(forceX*fx+forceZ*fz)/mass-Math.min(boatSpeed/h,(.12+braking*2.6))*hullContact;
   boatSpeed=Math.max(0,Math.min(powered?13:8,boatSpeed+h*Math.max(-8,Math.min(8,accelF))));
   const sideSpeed=(hullSlipX*rx+hullSlipZ*rz)+(forceX*rx+forceZ*rz)/mass*h;
   const sideBound=Math.max(-1.8,Math.min(1.8,sideSpeed))*Math.exp(-h*(.015+.335*hullContact));
@@ -8776,4 +8800,4 @@ begin().catch(error=>{
 });
 </script>
 </body></html>
-<!-- GitHub Pages redeploy trigger for Water Lab 28.12.6 -->
+<!-- GitHub Pages redeploy trigger for Water Lab 28.12.7 -->

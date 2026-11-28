@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.9.8 Original ocean startup loading</title>
+<title>Rift Water Lab · WebGPU 28.9.9 Original ocean startup loading</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -81,6 +81,12 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 #startupMeta{display:flex;justify-content:space-between;align-items:center;margin-top:10px;color:#9bcbd4;font-size:11px;font-variant-numeric:tabular-nums}
 #startupPercent{font-size:13px;font-weight:700;color:#e2ffff}
 @media(prefers-reduced-motion:reduce){#startupFill{transition:none}}
+/* Separate touch zones: joystick left, action panel right. */
+#controls{left:calc(max(18px,env(safe-area-inset-left)) + 156px);right:max(12px,env(safe-area-inset-right));bottom:max(18px,env(safe-area-inset-bottom));z-index:4}
+#controls .quickBar{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
+#controls .quickBar button{min-height:40px;white-space:normal}
+#settingsDrawer{left:auto;right:0;width:min(430px,calc(100vw - 24px));max-height:55vh}
+@media(max-width:640px){#joystick{width:112px;height:112px;bottom:calc(max(18px,env(safe-area-inset-bottom)) + 12px)}#controls{left:calc(max(18px,env(safe-area-inset-left)) + 124px)}#controls .quickBar button{font-size:11px;padding:7px 4px}}
 </style>
 <script type="importmap">
 {"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.187.0/build/three.webgpu.js","three/webgpu":"https://cdn.jsdelivr.net/npm/three@0.187.0/build/three.webgpu.js","three/tsl":"https://cdn.jsdelivr.net/npm/three@0.187.0/build/three.tsl.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.187.0/examples/jsm/"}}
@@ -102,7 +108,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.9.8</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.9.9</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="frameProfile" style="font-size:11px;line-height:1.4;color:#b5e4e8;margin:4px 0" role="status">Frame profiler: collecting</div>
@@ -1405,7 +1411,7 @@ function shorelineWaveFactor(x,z){
  if(offset<0)return .12;
  const d=seabedDepth(x,z),t=Math.max(0,Math.min(1,(d-.16)/3.8));
  const smooth=t*t*(3-2*t);
- return .12+.88*smooth;
+ return Math.min(1.12,.18+.82*smooth+.22*Math.sin(Math.PI*t));
 }
 // Test subjects reveal actual water transmission/attenuation. Parent to
 // seafloor so all local geometry follows the same translated floor tile.
@@ -2974,7 +2980,7 @@ function setupContinuousFloor(mat,detail){
 // Curved tropical cove: a shallow sloping beach, damp sand and a broken
 // foam fringe. The shore sits beyond the local test-water area so it does
 // not interfere with boat physics or the established seabed caustics.
-let shorelineFoamTexture=null,shorelineFoamMaterial=null,shorelineLast=-1;
+let shorelineFoamTexture=null,shorelineFoamMaterial=null,shorelineLast=-1,shoreSwashMesh=null,shoreWetMesh=null;
 // Shared shoreline profile keeps the beach, terrain and hull boundary aligned.
 function islandCoastZ(x){
  return -39+(x*x)/155+1.05*Math.sin(x*.105)+.42*Math.sin(x*.235+1.1);
@@ -3015,7 +3021,7 @@ function createTropicalShoreline(){
   (x,v)=>sand.clone().lerp(warm,Math.max(0,Math.min(.32,.12+.12*Math.sin(x*.11+v*8)))),sandMat);
  const wetMat=new THREE.MeshStandardMaterial({color:0xffffff,vertexColors:true,roughness:.27,metalness:.03});
  const wetA=new THREE.Color(0x9b9b7d),wetB=new THREE.Color(0xc3b38d);
- buildBand(18.9,20.35,(x,v)=>.018+v*.018,
+ shoreWetMesh=buildBand(18.9,20.35,(x,v)=>.018+v*.018,
   (x,v)=>wetA.clone().lerp(wetB,v*.65).multiplyScalar(.88+.08*Math.sin(x*.32)),wetMat);
  const n=512,data=new Uint8Array(n*64*4);
  for(let y=0;y<64;y++)for(let x=0;x<n;x++){
@@ -3029,7 +3035,7 @@ function createTropicalShoreline(){
  shorelineFoamTexture.minFilter=THREE.LinearMipmapLinearFilter;shorelineFoamTexture.magFilter=THREE.LinearFilter;
  shorelineFoamTexture.generateMipmaps=true;shorelineFoamTexture.needsUpdate=true;
  shorelineFoamMaterial=new THREE.MeshBasicMaterial({map:shorelineFoamTexture,transparent:true,opacity:.78,depthWrite:false,side:THREE.DoubleSide});
- buildBand(19.65,20.75,(x,v)=>.045+v*.012,
+ shoreSwashMesh=buildBand(19.65,20.75,(x,v)=>.045+v*.012,
   ()=>new THREE.Color(0xffffff),shorelineFoamMaterial);
  createIslandLandmass();
 }
@@ -3121,6 +3127,30 @@ function createIslandLandmass(){
 function updateTropicalShoreline(t){
  if(!shorelineFoamTexture)return;
  if(t-shorelineLast<.025)return;shorelineLast=t;
+ // Sample incoming ocean elevation along the fixed beach, then evolve
+ // asymmetric run-up and retreat with persistent local wetness.
+ if(!shoreSwashMesh||!shoreWetMesh)return;
+ const p=shoreSwashMesh.geometry.attributes.position,w=shoreWetMesh.geometry.attributes.position;
+ const stride=191,rows=19;
+ const state=shoreSwashMesh.userData.swash||(shoreSwashMesh.userData.swash=new Float32Array(stride));
+ const wet=shoreWetMesh.userData.wet||(shoreWetMesh.userData.wet=new Float32Array(stride));
+ for(let i=0;i<stride;i++){
+  const x=p.getX(i),coast=islandCoastZ(x);
+  const sea=oceanHeight(x,coast+24.5,t);
+  const group=.82+.18*Math.sin(x*.13-t*.48);
+  const target=Math.max(-.65,Math.min(2.7,(sea+.12)*2.4*group));
+  state[i]+=(target-state[i])*(target>state[i]?.23:.10);
+  wet[i]=Math.max(state[i],wet[i]-.012);
+  const front=20.18-state[i];
+  for(let j=0;j<rows;j++){
+   const k=j*stride+i,v=j/(rows-1);
+   const z=coast+front+(v-.12)*(.55+.30*Math.max(0,state[i]));
+   p.setXYZ(k,x,Math.max(.045,beachSurfaceHeight(x,z)+.018)+.018*Math.sin(v*Math.PI),z);
+   const wz=coast+20.18-wet[i]-.22+v*(Math.max(.2,wet[i])+.48);
+   w.setXYZ(k,x,beachSurfaceHeight(x,wz)+.006,wz);
+  }
+ }
+ p.needsUpdate=true;w.needsUpdate=true;
  shorelineFoamTexture.offset.x=(t*.012)%1;
  shorelineFoamTexture.offset.y=(Math.sin(t*.22)*.018);
 }
@@ -8503,4 +8533,4 @@ begin().catch(error=>{
 });
 </script>
 </body></html>
-<!-- GitHub Pages redeploy trigger for Water Lab 28.9.8 -->
+<!-- GitHub Pages redeploy trigger for Water Lab 28.9.9 -->

@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.10.5 Original ocean startup loading</title>
+<title>Rift Water Lab · WebGPU 28.11.0 Volumetric bubble clouds</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -109,7 +109,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.10.5</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.11.0</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="islandWaypoint" style="display:flex;align-items:center;gap:9px;padding:7px 0;color:#c5f5e9;font-size:13px"><span id="islandArrow" style="display:inline-block;font-size:22px;line-height:1;transform-origin:center">↑</span><span id="islandDistance">Island · locating</span></div>
@@ -4157,10 +4157,50 @@ function updateWhitewaterSpray(dt,t){
 // Local volumetric scattering proxy: soft, density-weighted cloud samples
 // distributed through the actual aeration layers, not surface decals.
 let aerationCloud=null,cloudTime=-100,cloudSamples=[];
+let bubbleVolumeAtlas=null,bubbleVolumeControls=null,bubbleVolumeLast=-100;
+const bubbleVolumeEnabled=!new URLSearchParams(location.search).has('noBubbleVolume');
+function updateBubbleVolume(t){
+ if(!bubbleVolumeAtlas)return;
+ bubbleVolumeControls.value.w=underwaterActive&&foamFieldReady&&breakingMode==='advanced'?Math.min(1,foamStrength)*underwaterBlend:0;
+ if(!bubbleVolumeControls.value.w||t-bubbleVolumeLast<(simTier===2?.18:.09))return;
+ bubbleVolumeLast=t;
+ const pixels=bubbleVolumeAtlas.image.data;
+ for(let j=0;j<FOAM_GRID;j++)for(let i=0;i<FOAM_GRID;i++){
+  const x=foamOriginX+i*FOAM_STEP,z=foamOriginZ+j*FOAM_STEP;
+  const h=oceanHeight(x,z,t),cell=j*FOAM_GRID+i;
+  let tau=0;
+  for(let k=0;k<FOAM_LAYERS;k++){
+   const gas=Math.max(0,Math.min(1,(entrainedAir[k*FOAM_PLANE+cell]-.018)*1.4));
+   const p=(k*FOAM_PLANE+cell)*4;
+   pixels[p]=Math.round(gas*255);
+   pixels[p+1]=Math.round(Math.exp(-tau-gas*.65)*255);
+   pixels[p+2]=Math.round(Math.max(0,Math.min(1,(h+4)/8))*255);
+   pixels[p+3]=255;
+   tau+=gas*1.5;
+  }
+ }
+ bubbleVolumeControls.value.x=foamOriginX;bubbleVolumeControls.value.y=foamOriginZ;
+ bubbleVolumeAtlas.needsUpdate=true;
+}
+function sampleBubbleVolume(point){
+ const {float,vec2,texture,smoothstep}=oceanTSL,u=bubbleVolumeControls;
+ const q=point.xz.sub(u.xy).div(FOAM_SPAN);
+ const px=q.clamp(0,1).mul(FOAM_GRID-1).add(.5);
+ const sample=k=>texture(bubbleVolumeAtlas,vec2(px.x.div(FOAM_GRID),px.y.add(k.mul(FOAM_GRID)).div(FOAM_GRID*FOAM_LAYERS)));
+ const surface=sample(float(0)).b.mul(8).sub(4);
+ const depth=surface.sub(point.y);
+ const layer=depth.div(FOAM_DZ).sub(.5).clamp(0,FOAM_LAYERS-1);
+ const lo=layer.floor(),a=sample(lo),b=sample(lo.add(1).min(FOAM_LAYERS-1));
+ const v=a.add(b.sub(a).mul(layer.fract()));
+ const edge=smoothstep(0,.06,q.x).mul(smoothstep(0,.06,q.y)).mul(float(1).sub(smoothstep(.94,1,q.x))).mul(float(1).sub(smoothstep(.94,1,q.y)));
+ const mask=edge.mul(smoothstep(.02,.16,depth)).mul(float(1).sub(smoothstep(1.35,1.8,depth))).mul(u.w);
+ return {density:v.r.mul(mask),sun:v.g};
+}
 function updateAerationCloud(t){
  if(!underwaterActive||!foamFieldReady||breakingMode!=='advanced'||foamStrength<.01){
   if(aerationCloud)aerationCloud.visible=false;cloudTime=-100;return;
  }
+ if(bubbleVolumeEnabled&&volumeMarchActive&&bubbleVolumeAtlas&&bubbleVolumeControls.value.w>0){if(aerationCloud)aerationCloud.visible=false;return;}
  if(!aerationCloud){
   if(!sprayTexture)sprayTexture=makeSprayTexture();
   aerationCloud=makeSprayBatch(.72,.23);
@@ -8071,6 +8111,12 @@ function buildVolumeMarch(composed,sceneDepth){
  volumeMarchCamera=uniform(new THREE.Matrix4());
  volumeMarchProjection=uniform(new THREE.Matrix4());
  volumeMarchSteps=uniform(16,'int');
+ if(bubbleVolumeEnabled){
+  bubbleVolumeAtlas=new THREE.DataTexture(new Uint8Array(FOAM_PLANE*FOAM_LAYERS*4),FOAM_GRID,FOAM_GRID*FOAM_LAYERS,THREE.RGBAFormat);
+  bubbleVolumeAtlas.minFilter=bubbleVolumeAtlas.magFilter=THREE.LinearFilter;
+  bubbleVolumeAtlas.generateMipmaps=false;bubbleVolumeAtlas.needsUpdate=true;
+  bubbleVolumeControls=uniform(new THREE.Vector4(0,0,0,0));
+ }
  // Evaluate wave-refraction once per frame and share it across all volume samples.
  // This avoids a costly wave-component loop inside every ray-march sample.
  volumeMarchLightDirection=uniform(new THREE.Vector3(.326,1,.163).normalize());
@@ -8102,11 +8148,24 @@ function buildVolumeMarch(composed,sceneDepth){
   // Static subpixel dither avoids regular marching bands without frame flicker.
   const jitter=uv.dot(vec2(127.1,311.7)).sin().mul(43758.5453).fract().mul(.7).add(.15);
   const accumulated=vec3(0).toVar();
+  const bubbleTransmission=float(1).toVar();
+  const bubbleRadiance=vec3(0).toVar();
   If(span.greaterThan(.01).and(controls.x.greaterThan(0)).and(lightControls.w.greaterThan(0)),()=>{
   Loop({start:int(0),end:int(count),type:'int',condition:'<'},({i})=>{
    const distance=begin.add(float(i).add(jitter).mul(step));
    const point=origin.add(ray.mul(distance));
    const field=sampleLightField(point);
+   if(bubbleVolumeEnabled){
+    If(bubbleVolumeControls.w.greaterThan(.001),()=>{
+     const gas=sampleBubbleVolume(point);
+     const extinction=gas.density.mul(4.8);
+     const slice=float(1).sub(extinction.mul(step).negate().exp());
+     const illumination=gas.sun.mul(.68).add(.22).mul(solidLightVisibility(point).mul(.65).add(.35));
+     const tint=vec3(.84,.96,1).mul(distance.mul(vec3(-.10,-.035,-.018)).exp());
+     bubbleRadiance.addAssign(tint.mul(illumination).mul(slice).mul(bubbleTransmission));
+     bubbleTransmission.mulAssign(float(1).sub(slice));
+    });
+   }
    const depth=point.y.negate().max(0);
    // Scattering follows the same refracted sunlight direction as the moving surface waves.
    const mu=ray.dot(volumeMarchLightDirection).clamp(-1,1);
@@ -8134,10 +8193,10 @@ function buildVolumeMarch(composed,sceneDepth){
     .add(vec3(.38,.78,.89).mul(spectral).mul(indirect)));
   });
   });
-  return accumulated.clamp(0,.48);
+  return vec4(accumulated.clamp(0,.48).mul(bubbleTransmission).add(bubbleRadiance),bubbleTransmission);
  })();
  volumeMarchActive=true;
- return vec4(composed.rgb.add(march),composed.a);
+ return vec4(composed.rgb.mul(march.a).add(march.rgb),composed.a);
 }
 function updateVolumeMarch(){
  if(!volumeMarchActive||!volumeMarchControls)return;
@@ -8434,6 +8493,7 @@ async function init3D(forceWebGL=false){
   }
   updateUnderwaterScattering();
   updateBreakerAeration(time);
+  try{updateBubbleVolume(time);}catch(error){if(bubbleVolumeControls)bubbleVolumeControls.value.w=0;console.warn('Bubble volume update',error);}
   try{updateAerationCloud(time);}catch(error){if(aerationCloud)aerationCloud.visible=false;console.error('Aeration cloud',error);}
   if(!volumetricFault){
    try{updateVolumetricShafts(time);}
@@ -8572,4 +8632,4 @@ begin().catch(error=>{
 });
 </script>
 </body></html>
-<!-- GitHub Pages redeploy trigger for Water Lab 28.10.5 -->
+<!-- GitHub Pages redeploy trigger for Water Lab 28.11.0 -->

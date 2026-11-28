@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.12.10 Surface continuity isolation</title>
+<title>Rift Water Lab · WebGPU 28.12.11 Ocean depth continuity</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -109,7 +109,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.12.10</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.12.11</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="islandWaypoint" style="display:flex;align-items:center;gap:9px;padding:7px 0;color:#c5f5e9;font-size:13px"><span id="islandArrow" style="display:inline-block;font-size:22px;line-height:1;transform-origin:center">↑</span><span id="islandDistance">Island · locating</span></div>
@@ -1367,7 +1367,8 @@ function syncWaterDetail(){
   mat.thicknessMap=null;
   mat.attenuationDistance=profile.distance;
   mat.attenuationColor.copy(absorption);
-  mat.depthWrite=!physical;
+  // The single ocean interface must participate in scene depth, including the underwater composite.
+  mat.depthWrite=true;
   mat.transparent=false;
   mat.color.setHex(physical?0x9ccdcc:0x168f90);
   mat.vertexColors=true;
@@ -7934,8 +7935,8 @@ function updateCamera(dt){
  const cy=cameraTarget.y+Math.sin(orbitPitch)*orbitDistance;
  const cz=cameraTarget.z+Math.cos(angle)*horizontal;
  const camFollow=1-Math.exp(-Math.max(dt,.001)*6.5);
- const floorX=cx-(waterFloor?.position.x||0),floorZ=cz-(waterFloor?.position.z||0);
- const floorY=-seabedDepth(floorX,floorZ);
+ // Terrain height functions use world coordinates, not translated mesh coordinates.
+ const floorY=-seabedDepth(cx,cz);
  camera.position.lerp(new THREE.Vector3(cx,Math.max(cy,floorY+1.25),cz),camFollow);
  camera.lookAt(cameraTarget.x,cameraTarget.y,cameraTarget.z);
 }
@@ -8517,7 +8518,7 @@ function updateScreenSpaceLighting(){
   if(!screenSpaceStarting&&!screenSpaceFailed)initScreenSpaceLighting();
   return false;
  }
- const depth=Math.max(0,-camera.position.y),clarity=Math.max(.4,waterClarity);
+ const depth=opticalDepth,clarity=Math.max(.4,waterClarity);
  const extinction=Math.exp(-depth*(opticalMode==='deep'?.16:.085)/clarity);
  screenGodrays.density.value=Math.min(.9,.32*underwaterBlend*
   volumetricStrength*extinction*underwaterDirectionalPhase());
@@ -8855,4 +8856,4 @@ begin().catch(error=>{
 });
 </script>
 </body></html>
-<!-- GitHub Pages redeploy trigger for Water Lab 28.12.10 -->
+<!-- GitHub Pages redeploy trigger for Water Lab 28.12.11 -->

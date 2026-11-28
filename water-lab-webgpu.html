@@ -8411,6 +8411,14 @@ async function init3D(forceWebGL=false){
    syncLocalWaterOptics();
    updateHullScreen(clockTime);
    const pending=useScreen?screenLightPipeline.render():renderer.render(scene,camera);
+   if(!window.__waterFirstFrame){
+    window.__waterFirstFrame=true;
+    window.__waterLoading?.progress(94,'Finishing first frame…');
+    Promise.resolve(pending).then(()=>window.__waterLoading?.complete()).catch(error=>{
+     window.__waterLoading?.fail('First frame failed: '+(error?.message||error));
+     console.error('First frame initialization failed',error);
+    });
+   }
    // WebGPU pipeline compilation errors often arrive as rejected promises,
    // rather than synchronous exceptions. Handle either form.
    if(useScreen&&pending?.catch)pending.catch(error=>{
@@ -8473,7 +8481,6 @@ async function init3D(forceWebGL=false){
  window.__waterLoading?.progress(88,'Rendering first ocean frame…');
  window.__waterFallback?.hide();
  loopActive=true;
- window.__waterLoading?.complete();
  window.addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);});
 }
 async function begin(){

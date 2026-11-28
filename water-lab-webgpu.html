@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.9.6 Original ocean startup loading</title>
+<title>Rift Water Lab · WebGPU 28.9.7 Original ocean startup loading</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -96,12 +96,13 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 (()=>{let value=2,finished=false;const root=document.getElementById('startupLoader'),fill=document.getElementById('startupFill'),stage=document.getElementById('startupStage'),track=document.getElementById('startupTrack'),pct=document.getElementById('startupPercent');
  const paint=()=>{if(!root)return;fill.style.width=value+'%';pct.textContent=Math.round(value)+'%';track.setAttribute('aria-valuenow',String(Math.round(value)));};
  window.__waterLoading={progress:(n,label)=>{if(finished)return;value=Math.max(value,Math.min(96,n));if(label)stage.textContent=label;paint();},message:m=>{if(!finished&&stage)stage.textContent=m;},complete:()=>{if(finished)return;finished=true;value=100;stage.textContent='Ocean ready';paint();setTimeout(()=>root.classList.add('done'),260);setTimeout(()=>{window.__waterFallback?.hide();root.remove();},1000);},fail:m=>{if(stage)stage.textContent=m||'Unable to initialize graphics. Please reload.';if(pct)pct.textContent='—';}};paint();
+ setTimeout(()=>{if(!finished&&value<8&&pct.textContent!=='—')stage.textContent='Still waiting for startup scripts. If this persists, reload the page.';},15000);
 })();
 </script>
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.9.6</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.9.7</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="frameProfile" style="font-size:11px;line-height:1.4;color:#b5e4e8;margin:4px 0" role="status">Frame profiler: collecting</div>
@@ -213,8 +214,8 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 
  const log=document.getElementById('log'),status=document.getElementById('backend');
  const note=(m)=>{log.textContent=m;};
- window.addEventListener('error',e=>{note('Startup error: '+(e.message||'unknown')+' — use the return link to continue in the existing Water Lab.');status.textContent='Backend: error';});
- window.addEventListener('unhandledrejection',e=>{note('GPU error: '+(e.reason?.message||e.reason||'unknown'));status.textContent='Backend: error';});
+ window.addEventListener('error',e=>{window.__waterLoading?.fail('Startup error: '+(e.message||'Script failed to load'));note('Startup error: '+(e.message||'unknown')+' — use the return link to continue in the existing Water Lab.');status.textContent='Backend: error';});
+ window.addEventListener('unhandledrejection',e=>{window.__waterLoading?.fail('Startup error: '+(e.reason?.message||e.reason||'unknown'));note('GPU error: '+(e.reason?.message||e.reason||'unknown'));status.textContent='Backend: error';});
  note('Page loaded. Checking browser and importing Three.js…');
  // A lightweight 2D ocean keeps the scene visible even if GPU initialization fails.
  const canvas=document.createElement('canvas');canvas.id='fallbackCanvas';
@@ -242,8 +243,17 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 })();
 </script>
 <script type="module">
-import {createWakeSolver} from './rift/water_lab_wake_solver.js?v=24-0';
-import {createGPUFFTOcean} from './rift/water_lab_webgpu_fft_v22.js?v=28-5-6';
+window.__waterLoading?.progress(3,'Loading wake solver…');
+let createWakeSolver,createGPUFFTOcean;
+try {
+ ({createWakeSolver}=await import('./rift/water_lab_wake_solver.js?v=24-0'));
+ window.__waterLoading?.progress(5,'Loading FFT ocean module…');
+ ({createGPUFFTOcean}=await import('./rift/water_lab_webgpu_fft_v22.js?v=28-5-6'));
+ window.__waterLoading?.progress(7,'Preparing simulation code…');
+} catch(error) {
+ window.__waterLoading?.fail('Module loading failed: '+(error?.message||error));
+ throw error;
+}
 const $=id=>document.getElementById(id);
 let renderer,scene,camera,water,geometry,base,THREE,boat,player,nearWater,nearGeometry,nearBase,nearColorData,skyDome;
 let walkMode=false,walkHeading=0,walkForward=false,walkLeft=false,walkRight=false;
@@ -8501,4 +8511,4 @@ begin().catch(error=>{
 });
 </script>
 </body></html>
-<!-- GitHub Pages redeploy trigger for Water Lab 28.9.6 -->
+<!-- GitHub Pages redeploy trigger for Water Lab 28.9.7 -->

@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.12.0 Breaking-wave hull coupling</title>
+<title>Rift Water Lab · WebGPU 28.12.1 Gravity-driven crest overturning</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -109,7 +109,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.12.0</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.12.1</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="islandWaypoint" style="display:flex;align-items:center;gap:9px;padding:7px 0;color:#c5f5e9;font-size:13px"><span id="islandArrow" style="display:inline-block;font-size:22px;line-height:1;transform-origin:center">↑</span><span id="islandDistance">Island · locating</span></div>
@@ -5811,12 +5811,22 @@ function crestFold(along,side,p,out){
  const a=p.age/p.life,H=p.height,L=Math.max(1.25,H*1.8),half=p.width*.5;
  if(Math.abs(along)>=L||Math.abs(side)>=half)return false;
  const u=along/L,edge=1-u*u,span=1-(side/half)**2;
- const ramp=Math.min(1,a/.25)*Math.min(1,(1-a)/.25);
+ // A tapered Lagrangian crest: the rear face feeds a gravity-driven lip.
+ const rise=Math.min(1,a/.28),ramp=rise*rise*(3-2*rise);
+ const decay=Math.max(0,Math.min(1,(1-a)/.26));
  const w=edge*edge*span*span*ramp;
- const curl=Math.max(0,Math.min(1,(a-.18)/.42))*Math.min(1,(1-a)/.28);
- const q=(u+.16)/.40,bell=Math.exp(-q*q);
- out.forward=H*1.65*curl*bell*w;
- out.up=H*w*(.35+.65*bell)*(1-.55*Math.max(0,(a-.65)/.35));
+ const q=(u+.16)/.36,bell=Math.exp(-q*q);
+ const launch=.32*p.life,flight=Math.max(0,p.age-launch);
+ const lipSpeed=Math.sqrt(9.81*H)*.72;
+ const tipHeight=H*.94+Math.sqrt(9.81*H)*.48*flight-4.905*flight*flight;
+ const travel=Math.min(H*1.9,lipSpeed*flight);
+ const collapse=p.hit?decay:1;
+ const shoulder=H*w*(.22+.78*Math.exp(-((u+.32)**2)/.23));
+ const jetWeight=bell*w;
+ out.forward=travel*jetWeight*collapse;
+ out.up=(shoulder*(1-.65*bell)+Math.max(0,tipHeight)*jetWeight)*collapse;
+ if(a<.32)out.up=shoulder;
+ if(p.hit)out.up*=Math.max(.12,decay);
  return true;
 }
 const crestOffset={forward:0,up:0};
@@ -5832,11 +5842,13 @@ function sampleBreakerHull(x,z,t,out){
   if(!crestFold(lip,side,p,breakerFoldScratch))continue;
   const front=lip+breakerFoldScratch.forward;
   const envelope=Math.exp(-((along-front)**2)/(.55+p.height*.6))*span*span;
-  const active=crestFoamPhase(a),collapse=Math.max(0,1-Math.abs(a-.73)/.24);
+  const active=crestFoamPhase(a),collapse=p.hit?Math.max(0,(1-a)/.35):0;
   out.height+=breakerFoldScratch.up*envelope*.42;
   const momentum=p.speed*envelope*active*(.22+.38*collapse);
   out.x+=p.fx*momentum;out.z+=p.fz*momentum;
-  out.y+=envelope*p.height*(a<.65?.55:-.65)*active;
+  const flight=Math.max(0,p.age-.32*p.life);
+  const vertical=p.hit?-.35:Math.max(-2.2,Math.min(1.1,Math.sqrt(9.81*p.height)*.48-9.81*flight));
+  out.y+=envelope*vertical*active*.65;
  }
  out.height=Math.min(.55,out.height);
  return out;
@@ -5920,15 +5932,18 @@ function updatePlunges(dt,t){
   if(waterColumn<.28){plungePool.splice(i,1);continue;}
   emitCrestParcels(p,t);
   // Approximate collapse impulse; a reconstructed liquid surface is needed for exact contact.
-  if(!p.hit&&a>.69){
+  const flight=Math.max(0,p.age-.32*p.life);
+  const tipHeight=p.height*.94+Math.sqrt(9.81*p.height)*.48*flight-4.905*flight*flight;
+  if(!p.hit&&a>.36&&(tipHeight<=.06||a>.83)){
    p.hit=true;plungeImpacts++;
    for(let k=-1;k<=1;k++){
     const side=k*p.width*.22,root=-.16*Math.max(1.25,p.height*1.8);
     crestFold(root,side,p,breakerFoldScratch);
-    const landing=root+breakerFoldScratch.forward+travelSpeed*.12;
+    const landing=root+Math.min(p.height*1.9,Math.sqrt(9.81*p.height)*.72*flight)+travelSpeed*.08;
     const x=p.x+p.fx*landing+p.fz*side,z=p.z+p.fz*landing-p.fx*side;
     if(seabedDepth(x,z)<.18)continue;
-    const e={x,z,energy:Math.min(.7,p.height*.4),age:0,fx:p.fx,fz:p.fz,plunge:true};
+    const impactSpeed=Math.max(0,9.81*flight-Math.sqrt(9.81*p.height)*.48);
+    const e={x,z,energy:Math.min(.85,.06*impactSpeed*impactSpeed),age:0,fx:p.fx,fz:p.fz,plunge:true};
     entryEvents.push(e);entryAirQueue.push({...e});emitPlungeBubbles(e,t);spawnFoamParcel(x,z,Math.min(1,e.energy*1.8)*foamStrength,p.fx*p.speed*.35,p.fz*p.speed*.35);for(let n=0;n<4;n++)emitWhitewater(x,z,t,e.energy*1.8,p.fx,p.fz);
    }
    while(entryEvents.length>12)entryEvents.shift();while(entryAirQueue.length>12)entryAirQueue.shift();
@@ -8715,4 +8730,4 @@ begin().catch(error=>{
 });
 </script>
 </body></html>
-<!-- GitHub Pages redeploy trigger for Water Lab 28.12.0 -->
+<!-- GitHub Pages redeploy trigger for Water Lab 28.12.1 -->

@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.8.3 Shoreline enabled</title>
+<title>Rift Water Lab · WebGPU 28.9.0 Walkable beach</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.8.3</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.9.0</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="frameProfile" style="font-size:11px;line-height:1.4;color:#b5e4e8;margin:4px 0" role="status">Frame profiler: collecting</div>
@@ -89,7 +89,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 </div>
 <div id="controls" class="panel">
  <div class="quickBar">
-  <button id="modeSwitch" aria-pressed="true">Camera: Chase</button>
+  <button id="modeSwitch" aria-pressed="true">Camera: Chase</button><button id="leaveBoat" type="button">Leave boat</button>
   <button id="pause">Pause</button>
   <button id="settingsToggle" type="button" aria-controls="settingsDrawer" aria-expanded="false">⚙ Settings</button>
  </div>
@@ -221,7 +221,8 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 import {createWakeSolver} from './rift/water_lab_wake_solver.js?v=24-0';
 import {createGPUFFTOcean} from './rift/water_lab_webgpu_fft_v22.js?v=28-5-6';
 const $=id=>document.getElementById(id);
-let renderer,scene,camera,water,geometry,base,THREE,boat,nearWater,nearGeometry,nearBase,nearColorData,skyDome;
+let renderer,scene,camera,water,geometry,base,THREE,boat,player,nearWater,nearGeometry,nearBase,nearColorData,skyDome;
+let walkMode=false,walkHeading=0,walkForward=false,walkLeft=false,walkRight=false;
 let buoyancyStrength=1,vy=0,pitchV=0,rollV=0,rideDamping=1;
 let boatHeading=0,boatSpeed=0,rudder=0,sailPower=.85,driveMode='stop',steeringLeft=false,steeringRight=false,totalTravel=0,hullPhysics='dynamic',lastHullDrag=0;
 let wakeSolver=null,wakeAmount=1.1,waveChop=.45,previousBoatHeading=0,turnVelocity=0;
@@ -2963,7 +2964,7 @@ function createTropicalShoreline(){
  };
  const sandMat=new THREE.MeshStandardMaterial({color:0xffffff,vertexColors:true,roughness:.92,metalness:0});
  const sand=new THREE.Color(0xf1dfb8),warm=new THREE.Color(0xe8d1a7);
- buildBand(.18,20,(x,v,z)=>.10+v*2.35+.10*Math.sin(x*.17+v*4)*Math.sin(z*.13),
+ buildBand(.18,20,(x,v,z)=>.30+v*2.35+.045*Math.sin(x*.17+v*4)*Math.sin(z*.13),
   (x,v)=>sand.clone().lerp(warm,Math.max(0,Math.min(.32,.12+.12*Math.sin(x*.11+v*8)))),sandMat);
  const wetMat=new THREE.MeshStandardMaterial({color:0xffffff,vertexColors:true,roughness:.27,metalness:.03});
  const wetA=new THREE.Color(0x9b9b7d),wetB=new THREE.Color(0xc3b38d);
@@ -3079,8 +3080,9 @@ function updateTropicalShoreline(t){
 
 
 function islandContainsWorldPoint(x,z){
- const depth=82,coastZ=islandCoastZ(x)+.18;
- const along=(coastZ-z)/depth;
+ const coast=islandCoastZ(x),shoreOffset=z-coast;
+ if(shoreOffset>=.05&&shoreOffset<=20.35)return Math.abs(x)<=65;
+ const along=(coast+.18-z)/82;
  if(along<-.015||along>1.015)return false;
  return Math.abs(x)<=62*islandWidthFactor(Math.max(0,Math.min(1,along)))+.45;
 }
@@ -7027,11 +7029,13 @@ function animateWaves(t){
   const x=px+cx,z=pz+cz;
   if(offshoreGPU?.mask[i/3]){if(offshoreTint){const w=waveField(x,z,t);oceanSpectralTint(x,z,w.height,w.slopeX,w.slopeZ,nearColorData,i);}deformationWeights[i/3]=0;continue;}
   const wave=waveField(x,z,t);
+  const coast=islandCoastZ(x),onLand=x>=-65&&x<=65&&z<coast+20.25;
   const wx=x+wave.dx,wz=z+wave.dz;
   const fade=oceanFieldSupport(wx,wz,36,4);
   if(fade<=0){arr[i]=px+wave.dx;arr[i+1]=wave.height;arr[i+2]=pz+wave.dz;smoothWaterNormal(nearNormals,i,wave.slopeX,wave.slopeZ);oceanSpectralTint(x,z,wave.height,wave.slopeX,wave.slopeZ,nearColorData,i);deformationWeights[i/3]=0;continue;}
   const disturbance=oceanWakeOffset(wx,wz);
   arr[i]=px+wave.dx;arr[i+2]=pz+wave.dz;
+  if(onLand){arr[i+1]=-8;deformationWeights[i/3]=0;smoothWaterNormal(nearNormals,i,0,0);oceanSpectralTint(x,z,0,0,0,nearColorData,i);continue;}
   const liquidLift=rcSurfaceOffset(wx,wz);
   arr[i+1]=wave.height+disturbance+liquidLift;
   if(liquidLift>.002)crestVertices++;
@@ -7111,6 +7115,49 @@ function resetBoat(){
  clearTurbulence();wwGPUEpoch++;wwGPUCache=null;wwGPULast=-100;foamFieldReady=false;flowReady=false;foamVortices.length=0;vortexShed=0;vortexWaveShed=0;clearPlunges();clearAP();activeObjectFoam.length=0;objectFoamLast=-100;objectFoamHits=0;for(const o of surfaceFoamObjects){o.wet=0;o.last=-100;o.prevSurface=NaN;o.sampleAt=-100;o.runup=0;o.runupSea=NaN;o.spillBudget=0;o.spillAt=-100;o.shedPhase=0;o.shedSide=0;}foamParcels.length=0;liquidFoamLast=-100;parcelClock=0;clearFoamFilms();foamDensity.fill(0);foamNext.fill(0);entrainedAir.fill(0);airNext.fill(0);breakingFoam.length=0;foamBubbles.length=0;foamBubbleSpawn=0;whitewaterSpray.length=0;sprayImpacts.length=0;cloudSamples=[];cloudTime=-100;
  if($('forward')){setDriveMode('stop');}
 }
+
+function makeWalkCharacter(){
+ player=new THREE.Group();player.visible=false;
+ const skin=new THREE.MeshStandardMaterial({color:0xd7a77e,roughness:.9});
+ const shirt=new THREE.MeshStandardMaterial({color:0x2d8290,roughness:.88});
+ const pants=new THREE.MeshStandardMaterial({color:0x34465b,roughness:.9});
+ const torso=new THREE.Mesh(new THREE.CapsuleGeometry(.27,.62,4,8),shirt);torso.position.y=1.02;player.add(torso);
+ const head=new THREE.Mesh(new THREE.SphereGeometry(.22,12,10),skin);head.position.y=1.62;player.add(head);
+ for(const side of [-1,1]){
+  const leg=new THREE.Mesh(new THREE.CapsuleGeometry(.105,.48,3,7),pants);leg.position.set(side*.13,.39,0);player.add(leg);
+  const arm=new THREE.Mesh(new THREE.CapsuleGeometry(.085,.43,3,7),skin);arm.position.set(side*.34,1.02,0);player.add(arm);
+ }
+ player.name='Beach explorer';scene.add(player);
+}
+function beachGround(x,z){
+ const coast=islandCoastZ(x),v=Math.max(0,Math.min(1,(z-coast-.18)/20));
+ return .30+v*2.35+.045*Math.sin(x*.17+v*4)*Math.sin(z*.13);
+}
+function setWalkMode(enabled){
+ if(!player||!boat)return;
+ if(enabled){
+  const coast=islandCoastZ(boat.position.x),gap=boat.position.z-(coast+20);
+  if(gap>7.5){$('log').textContent='Sail closer to the beach before leaving the boat.';return;}
+  player.position.set(boat.position.x,beachGround(boat.position.x,coast+3)+.04,coast+3);
+  walkHeading=boatHeading;player.rotation.y=walkHeading;player.visible=true;walkMode=true;boatSpeed=0;setDriveMode('stop');
+  $('leaveBoat').textContent='Return to boat';$('port').textContent='◀ Turn';$('starboard').textContent='Turn ▶';$('forward').textContent='▲ Walk';$('stopBoat').textContent='Board boat';$('buoyancyState').textContent='On foot · walkable beach';
+ }else{
+  if(Math.hypot(player.position.x-boat.position.x,player.position.z-boat.position.z)>7){$('log').textContent='Walk closer to the boat to board it.';return;}
+  walkMode=false;player.visible=false;walkForward=walkLeft=walkRight=false;
+  boat.position.y=Math.max(.55,oceanHeight(boat.position.x,boat.position.z,clockTime)+.35);vy=0;boatSpeed=0;boatHeading=walkHeading;boat.rotation.y=boatHeading;
+  $('leaveBoat').textContent='Leave boat';$('port').textContent='◀ Left';$('starboard').textContent='Right ▶';$('forward').textContent='▲ Forward';$('stopBoat').textContent='■ Stop';$('buoyancyState').textContent='Boat: 4-point floating + sailing';
+ }
+}
+function stepPlayer(dt){
+ if(!walkMode||!player?.visible||dt<=0)return;
+ if(walkLeft)walkHeading+=dt*1.65;if(walkRight)walkHeading-=dt*1.65;
+ if(walkForward){
+  const nx=player.position.x-Math.sin(walkHeading)*dt*3.1,nz=player.position.z-Math.cos(walkHeading)*dt*3.1,offset=nz-islandCoastZ(nx);
+  if(Math.abs(nx)<=64&&offset>=.55&&offset<=19.6){player.position.x=nx;player.position.z=nz;}
+ }
+ player.position.y=beachGround(player.position.x,player.position.z)+.04;player.rotation.y=walkHeading;
+}
+
 function makeBoat(){
  boat=new THREE.Group();boat.rotation.order='YXZ';
  // Hull was authored with its pointed bow toward local +Z, but the
@@ -7141,7 +7188,7 @@ function makeBoat(){
  sail.position.set(0,2.18,.12);sail.rotation.y=.22;boatVisual.add(sail);
  const boom=new THREE.Mesh(new THREE.BoxGeometry(1.95,.075,.075),trim);
  boom.position.set(0,2.93,.12);boatVisual.add(boom);
- scene.add(boat);resetBoat();
+ scene.add(boat);resetBoat();makeWalkCharacter();
 }
 // Eight distributed points approximate the hull's displaced volume.
 // The four-point model remains selectable as a regression comparison.
@@ -7379,20 +7426,18 @@ function bindHelm(id,dir){
 bindHelm('port',-1);bindHelm('starboard',1);
 const pressed=new Set();
 window.addEventListener('keydown',e=>{
- if(!['ArrowLeft','ArrowRight','KeyA','KeyD','KeyW','KeyS','Space'].includes(e.code))return;
+ if(!['ArrowLeft','ArrowRight','ArrowUp','KeyA','KeyD','KeyW','KeyS','Space'].includes(e.code))return;
  if(e.target?.tagName==='INPUT')return;
  e.preventDefault();pressed.add(e.code);
- steeringLeft=pressed.has('ArrowLeft')||pressed.has('KeyA');
- steeringRight=pressed.has('ArrowRight')||pressed.has('KeyD');
- if(e.code==='KeyW')setDriveMode('forward');
- if(e.code==='KeyS'||e.code==='Space')setDriveMode('stop');
+ if(walkMode){walkLeft=pressed.has('ArrowLeft')||pressed.has('KeyA');walkRight=pressed.has('ArrowRight')||pressed.has('KeyD');walkForward=pressed.has('KeyW')||pressed.has('ArrowUp');}
+ else{steeringLeft=pressed.has('ArrowLeft')||pressed.has('KeyA');steeringRight=pressed.has('ArrowRight')||pressed.has('KeyD');if(e.code==='KeyW')setDriveMode('forward');if(e.code==='KeyS'||e.code==='Space')setDriveMode('stop');}
 });
 window.addEventListener('keyup',e=>{
  pressed.delete(e.code);
- steeringLeft=pressed.has('ArrowLeft')||pressed.has('KeyA');
- steeringRight=pressed.has('ArrowRight')||pressed.has('KeyD');
+ if(walkMode){walkLeft=pressed.has('ArrowLeft')||pressed.has('KeyA');walkRight=pressed.has('ArrowRight')||pressed.has('KeyD');walkForward=pressed.has('KeyW')||pressed.has('ArrowUp');}
+ else{steeringLeft=pressed.has('ArrowLeft')||pressed.has('KeyA');steeringRight=pressed.has('ArrowRight')||pressed.has('KeyD');}
 });
-window.addEventListener('blur',()=>{pressed.clear();steeringLeft=false;steeringRight=false;});
+window.addEventListener('blur',()=>{pressed.clear();steeringLeft=false;steeringRight=false;walkForward=walkLeft=walkRight=false;});
 // Third-person camera is independent from helm input. On mobile the
 // canvas captures gestures; UI buttons capture their own touch events.
 function resetCamera(){
@@ -7445,12 +7490,13 @@ function bindCameraGestures(surface){
 }
 function updateCamera(dt){
  if(!boat)return;
+ const actor=walkMode&&player?.visible?player:boat;
  const follow=1-Math.exp(-Math.max(dt,.001)*4);
- const desired={x:boat.position.x,y:boat.position.y+1.1,z:boat.position.z};
+ const desired={x:actor.position.x,y:actor.position.y+(walkMode?1.15:1.1),z:actor.position.z};
  cameraTarget.x+=(desired.x-cameraTarget.x)*follow;
  cameraTarget.y+=(desired.y-cameraTarget.y)*follow;
  cameraTarget.z+=(desired.z-cameraTarget.z)*follow;
- const angle=orbitYaw+(cameraMode==='chase'?boatHeading:0);
+ const angle=orbitYaw+(cameraMode==='chase'?(walkMode?walkHeading:boatHeading):0);
  const horizontal=orbitDistance*Math.cos(orbitPitch);
  const cx=cameraTarget.x+Math.sin(angle)*horizontal;
  const cy=cameraTarget.y+Math.sin(orbitPitch)*orbitDistance;
@@ -7462,6 +7508,14 @@ function updateCamera(dt){
  camera.lookAt(cameraTarget.x,cameraTarget.y,cameraTarget.z);
 }
 $('modeSwitch').onclick=setCameraMode;
+$('leaveBoat').onclick=()=>setWalkMode(!walkMode);
+$('forward').onclick=()=>{if(walkMode)walkForward=true;else setDriveMode('forward');};
+$('stopBoat').onclick=()=>{if(walkMode)setWalkMode(false);else setDriveMode('stop');};
+$('port').addEventListener('pointerdown',()=>{if(walkMode)walkLeft=true;});
+$('starboard').addEventListener('pointerdown',()=>{if(walkMode)walkRight=true;});
+for(const [id,dir] of [['port','left'],['starboard','right']])for(const ev of ['pointerup','pointercancel','lostpointercapture'])$(id).addEventListener(ev,()=>{if(dir==='left')walkLeft=false;else walkRight=false;});
+$('forward').addEventListener('pointerdown',()=>{if(walkMode)walkForward=true;});
+for(const ev of ['pointerup','pointercancel','lostpointercapture'])$('forward').addEventListener(ev,()=>{walkForward=false;});
 $('resetCamera').onclick=resetCamera;
 $('pause').onclick=()=>{paused=!paused;$('pause').textContent=paused?'Resume':'Pause';};
 $('hullPhysics').onchange=()=>{hullPhysics=$('hullPhysics').value;};
@@ -8154,7 +8208,7 @@ async function init3D(forceWebGL=false){
    const targetFFT=waveEngine!=='analytic'&&gpuFFT?.ready&&!fftFault&&Number.isFinite(gpuFFT.rms)?1:0;
    fftMix+=(targetFFT-fftMix)*Math.min(1,dt*1.75);
    const headingBefore=boatHeading;
-   stepBoat(dt,time);
+   if(walkMode)stepPlayer(dt);else stepBoat(dt,time);
    turnVelocity=dt>0?(boatHeading-headingBefore)/dt:0;
    // High-resolution interaction follows the boat every frame.
    // Seabed follows with the camera while preserving its world-relative

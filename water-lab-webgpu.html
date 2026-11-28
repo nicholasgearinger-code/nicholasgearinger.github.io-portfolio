@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.12.8 Pressure-driven hull displacement</title>
+<title>Rift Water Lab · WebGPU 28.12.9 Shared water interface</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -109,7 +109,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.12.8</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.12.9</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="islandWaypoint" style="display:flex;align-items:center;gap:9px;padding:7px 0;color:#c5f5e9;font-size:13px"><span id="islandArrow" style="display:inline-block;font-size:22px;line-height:1;transform-origin:center">↑</span><span id="islandDistance">Island · locating</span></div>
@@ -297,7 +297,7 @@ function updateUnderwaterMirror(t){
  const target=underwaterMirror,previous=renderer.getRenderTarget();
  const hidden=[];const prevShadow=mainSun?.castShadow;
  try{
-  const plane=oceanHeight(camera.position.x,camera.position.z,t);
+  const plane=sampleFinalWaterSurface(camera.position.x,camera.position.z,t);
   camera.updateMatrixWorld();mirrorCamera.copy(camera,false);
   mirrorCamera.position.y=2*plane-camera.position.y;
   const direction=camera.getWorldDirection(new THREE.Vector3());direction.y=-direction.y;
@@ -334,7 +334,7 @@ function createOceanMaterial(options){
   const fresnel=rs.mul(rs).add(rp.mul(rp)).mul(.5).clamp(0,1);
   const tir=oceanTSL.smoothstep(.985,1.015,sin2);
   const reflectance=fresnel.mul(float(1).sub(tir)).add(tir);
-  const wet=oceanAngleBlend.mul(oceanTSL.smoothstep(-.10,.015,v.y.negate()));
+  const wet=oceanAngleBlend.mul(oceanTSL.frontFacing.select(float(0),float(1)));
   const sculpted=wet.mul(enhancedUnderwaterLight?1:0);
   // Separate optical extinction from geometric refraction offset. The
   // latter stays zero above water to avoid ghost copies of the boat.
@@ -1151,14 +1151,14 @@ function updateUnderwaterScattering(){
  if(!camera||!scene)return;
  if(!dayFog)dayFog=scene.fog;
  if(!underwaterBackgroundColor)underwaterBackgroundColor=new THREE.Color();
- const surface=oceanHeight(camera.position.x,camera.position.z,clockTime);
+ const surface=sampleFinalWaterSurface(camera.position.x,camera.position.z,clockTime);
  const depth=Math.max(0,surface-camera.position.y);
  opticalDepth=depth;
  const targetAir=localAirFraction(camera.position.x,camera.position.z,depth);
  opticalAir+=(targetAir-opticalAir)*(1-Math.exp(-Math.max(.001,clockDelta)*4));
  const enhanced=undersideMode==='enhanced'&&opticalMode!=='legacy';
- const width=Math.max(.2,waterlineSoftness);
- const normalized=Math.max(0,Math.min(1,((surface-camera.position.y)/width+.65)/1.30));
+ const width=Math.max(.08,Math.min(.24,waterlineSoftness));
+ const normalized=Math.max(0,Math.min(1,(surface-camera.position.y+.015)/width));
  const target=enhanced?normalized*normalized*(3-2*normalized):
    Math.max(0,Math.min(1,(surface+.18-camera.position.y)/.9));
  const smoothing=enhanced?1-Math.exp(-Math.max(.001,Math.min(.05,clockDelta))*11):.18;
@@ -1361,7 +1361,7 @@ function syncWaterDetail(){
   if(isNear&&physical&&hullOpticsEnabled&&!hullOpticalThickness)hullOpticalThickness=createHullOpticalThickness();
   // Both ocean regions must use the same optical path. The old radial
   // hull thickness mask made an artificial clear patch during immersion.
-  mat.thicknessMap=null;
+  mat.thicknessMap=thicknessTexture||null;
   mat.attenuationDistance=profile.distance;
   mat.attenuationColor.copy(absorption);
   mat.depthWrite=!physical;
@@ -3529,6 +3529,33 @@ async function restartFFT(){
  if(waveEngine!=='analytic'&&isWebGPU)await startFFT();
  else fftMessage('safe analytic waves');
 }
+// Render-interface sampler: same base wave, wake and reconstructed lift
+// as the shared double-sided ocean mesh. Do not use hull safety deformation
+// as a water-level reference for the camera.
+const interfaceWaveScratch={},interfaceFoldScratch={forward:0,up:0};
+function sampleFinalWaterSurface(x,z,t){
+ let bx=x,bz=z;
+ for(let i=0;i<3;i++){
+  const w=waveField(bx,bz,t,interfaceWaveScratch);
+  let dx=w.dx,dz=w.dz;
+  const fade=oceanFieldSupport(x,z,36,4);
+  for(const p of plungePool){
+   const px=bx-p.x,pz=bz-p.z;
+   if(crestFold(px*p.fx+pz*p.fz,px*p.fz-pz*p.fx,p,interfaceFoldScratch)){
+    dx+=p.fx*interfaceFoldScratch.forward*fade;dz+=p.fz*interfaceFoldScratch.forward*fade;
+   }
+  }
+  bx=x-dx;bz=z-dz;
+ }
+ const w=waveField(bx,bz,t,interfaceWaveScratch);
+ let h=w.height+oceanWakeOffset(x,z)+rcSurfaceOffset(x,z);
+ const fade=oceanFieldSupport(x,z,36,4);
+ for(const p of plungePool){
+  const px=bx-p.x,pz=bz-p.z;
+  if(crestFold(px*p.fx+pz*p.fz,px*p.fz-pz*p.fx,p,interfaceFoldScratch))h+=interfaceFoldScratch.up*fade;
+ }
+ return Number.isFinite(h)?h:0;
+}
 function oceanHeight(x,z,t){
  let bx=x,bz=z;
  if(waveChop>.001){
@@ -4699,7 +4726,8 @@ function hullClipSurface(arr,i,cx,cz){
  // Smooth the displacement over the interior band to avoid a sharp exterior rim.
  const edge=Math.min(hullSectionBeam(hullClipP.z,hullClipP.y)-Math.abs(hullClipP.x),hullClipP.z+2.65,2.20-hullClipP.z);
  const a=Math.max(0,Math.min(1,edge/.24)),blend=a*a*(3-2*a);
- hullClipP.y+=(hullKeel(hullClipP.z)-.045-hullClipP.y)*blend;
+ // Limit the depression to the opaque interior; avoid exposing a false second surface.
+ hullClipP.y-=Math.min(.045,Math.max(0,hullClipP.y-hullKeel(hullClipP.z)))*blend;
  hullClipP.applyQuaternion(boat.quaternion);
  arr[i]=hullClipP.x+boat.position.x-cx;arr[i+1]=hullClipP.y+boat.position.y;arr[i+2]=hullClipP.z+boat.position.z-cz;
  return true;
@@ -5743,7 +5771,7 @@ function updateFoamSkin(t){
  foamSkin.visible=breakingMode==='advanced'&&foamStrength>.01&&foamFieldReady;
  if(!foamSkin.visible){foamOpticalTime=-1e6;return;}
  foamSkin.position.copy(nearWater.position);
- if(foamSkin.material.userData.gpuFoamSkin){foamSkin.position.y+=.013;updateFoamShaderFields();return;}
+ if(foamSkin.material.userData.gpuFoamSkin){foamSkin.position.y+=.002;updateFoamShaderFields();return;}
  const src=nearGeometry.attributes.position.array,norm=nearGeometry.attributes.normal.array;
  const geo=foamSkin.geometry,p=geo.attributes.position.array,uv=geo.attributes.uv.array,detailUV=geo.attributes.uv1.array;
  // Evaluate optical microstructure in world coordinates. Reproject the
@@ -5810,7 +5838,7 @@ function updateFoamSkin(t){
  const activeLength=Math.min(src.length,(geo.userData.activeFoamVertices||src.length/3)*3);
  for(let i=0,j=0;i<activeLength;i+=3,j+=2){
   const x=src[i]+cx,z=src[i+2]+cz,d=sampleFoamDensity(x,z),sub=foamLayer(x,z,1);
-  p[i]=src[i];p[i+1]=src[i+1]+.009+.024*Math.min(1,d*.8+sub*.35);p[i+2]=src[i+2];
+  p[i]=src[i];p[i+1]=src[i+1]+.003;p[i+2]=src[i+2];
   uv[j]=.5+(x-foamOpticalX)/FOAM_SPAN;uv[j+1]=.5+(z-foamOpticalZ)/FOAM_SPAN;
   detailUV[j]=(x-foamLayer(x,z,0,foamDriftX))/(LOCAL_RADIUS*2);detailUV[j+1]=(z-foamLayer(x,z,0,foamDriftZ))/(LOCAL_RADIUS*2);
  }
@@ -8824,4 +8852,4 @@ begin().catch(error=>{
 });
 </script>
 </body></html>
-<!-- GitHub Pages redeploy trigger for Water Lab 28.12.8 -->
+<!-- GitHub Pages redeploy trigger for Water Lab 28.12.9 -->

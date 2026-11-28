@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.9.7 Original ocean startup loading</title>
+<title>Rift Water Lab · WebGPU 28.9.8 Original ocean startup loading</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -102,7 +102,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.9.7</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.9.8</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="frameProfile" style="font-size:11px;line-height:1.4;color:#b5e4e8;margin:4px 0" role="status">Frame profiler: collecting</div>
@@ -193,7 +193,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div class="row"><label>Hull ride damping <input type="range" id="rideDamping" min=".5" max="1.6" step=".05" value="1"></label><output id="rideDampingOut">1.00</output></div>
 <div class="row"><label>Forward power <input id="sailPower" type="range" min="0" max="1" step=".05" value=".85"></label><output id="sailPowerOut">85%</output></div>
 
-<p>Drive through directional ocean swells and watch hull-generated waves propagate behind you. Use Leave boat near the beach to walk ashore. On foot: Forward walks, Left / Right turn, Board boat returns you to the helm. In the boat: Forward / Stop control propulsion; Left / Right steer. Drag to orbit, pinch to zoom.</p>
+<p>Drive through directional ocean swells and watch hull-generated waves propagate behind you. Use Leave boat near the beach to walk ashore. On foot: Forward walks, Left / Right turn, Board boat returns you to the helm. Use the joystick to move and steer; release to stop. Drag to orbit, pinch to zoom.</p>
 
  </div>
 </div>
@@ -7618,15 +7618,7 @@ function updateCamera(dt){
 }
 $('modeSwitch').onclick=setCameraMode;
 $('leaveBoat').onclick=()=>setWalkMode(!walkMode);
-// Walking is a hold-to-move action; pointerup releases it. Avoid a
-// synthesized click re-arming movement after the finger is lifted.
-$('forward').onclick=()=>{if(!walkMode)setDriveMode('forward');};
-$('stopBoat').onclick=()=>{if(!walkMode)setDriveMode('stop');};
-$('port').addEventListener('pointerdown',()=>{if(walkMode)walkLeft=true;});
-$('starboard').addEventListener('pointerdown',()=>{if(walkMode)walkRight=true;});
-for(const [id,dir] of [['port','left'],['starboard','right']])for(const ev of ['pointerup','pointercancel','lostpointercapture'])$(id).addEventListener(ev,()=>{if(dir==='left')walkLeft=false;else walkRight=false;});
-$('forward').addEventListener('pointerdown',()=>{if(walkMode)walkForward=true;});
-for(const ev of ['pointerup','pointercancel','lostpointercapture'])$('forward').addEventListener(ev,()=>{walkForward=false;});
+// Movement is handled exclusively by the shared joystick and keyboard.
 $('resetCamera').onclick=resetCamera;
 $('pause').onclick=()=>{paused=!paused;$('pause').textContent=paused?'Resume':'Pause';};
 $('hullPhysics').onchange=()=>{hullPhysics=$('hullPhysics').value;};
@@ -8511,4 +8503,4 @@ begin().catch(error=>{
 });
 </script>
 </body></html>
-<!-- GitHub Pages redeploy trigger for Water Lab 28.9.7 -->
+<!-- GitHub Pages redeploy trigger for Water Lab 28.9.8 -->

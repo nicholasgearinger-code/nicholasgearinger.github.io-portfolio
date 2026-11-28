@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.12.7 Mass distribution and orbital flow</title>
+<title>Rift Water Lab · WebGPU 28.12.8 Pressure-driven hull displacement</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -109,7 +109,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.12.7</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.12.8</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="islandWaypoint" style="display:flex;align-items:center;gap:9px;padding:7px 0;color:#c5f5e9;font-size:13px"><span id="islandArrow" style="display:inline-block;font-size:22px;line-height:1;transform-origin:center">↑</span><span id="islandDistance">Island · locating</span></div>
@@ -4661,7 +4661,14 @@ function objectWaveStep(height,velocity,nextH,nextV,solid,force,n,h,dt,c2){
 const hullWaveEnabled=!new URLSearchParams(location.search).has('noHullWaves');
 let hullWaveCells=0,hullClipCount=0;
 const hullCouplingEnabled=!new URLSearchParams(location.search).has('noHullCoupling');
-const owHull=new Uint8Array(OW_SIZE),couplingFlow={};
+const owHull=new Uint8Array(OW_SIZE),couplingFlow={},couplingFluid={};
+const hullPressureHead=new Float32Array(OW_SIZE),hullPressureWeight=new Float32Array(OW_SIZE);
+function hullDynamicHead(normalSpeed,depth){
+ const wet=Math.max(0,Math.min(1,depth/.14));
+ const u=Math.max(-4,Math.min(4,normalSpeed));
+ // Positive stagnation pressure, weaker separated-flow suction aft.
+ return wet*Math.max(-.075,Math.min(.28,u*Math.abs(u)/(2*9.81)*(u>=0?.65:.16)));
+}
 let couplingX=0,couplingZ=0,couplingYaw=0,couplingPeak=0;
 let hullRideReference=NaN,hullRideRate=0;
 function hullHalfBeam(z){
@@ -4710,7 +4717,7 @@ function advanceObjectWaves(dt,t){
  }
  const c2=5.5;
  if(moved||t-owLast>=.10){
-  owLast=t;owSolid.fill(0);owHull.fill(0);owIncident.fill(0);owCells=0;hullWaveCells=0;owBuilding=true;
+  owLast=t;owSolid.fill(0);owHull.fill(0);owIncident.fill(0);hullPressureHead.fill(0);hullPressureWeight.fill(0);owCells=0;hullWaveCells=0;owBuilding=true;
   try{
    for(const o of rocks){
     const rx=o.x+waterFloor.position.x,rz=o.z+waterFloor.position.z,top=o.top+waterFloor.position.y;
@@ -4747,16 +4754,33 @@ function advanceObjectWaves(dt,t){
      if(!hullCouplingEnabled){owForce[k]=Math.max(-12,Math.min(12,owForce[k]+(nx*fx+nz*fz)*speed*.95));continue;}
      nx/=len;nz/=len;
      const wx=x+i*OW_H,wz=z+j*OW_H,dx=wx-boat.position.x,dz=wz-boat.position.z;
+     const lx=c*dx-sn*dz,lz=sn*dx+c*dz;
+     const sea=owIncident[k]||waveField(wx,wz,t,owProbe).height;
+     const depth=Math.max(0,Math.min(.58,sea-boat.position.y+Math.sin(boat.rotation.x)*lz-Math.sin(boat.rotation.z)*lx-hullKeel(lz)));
+     if(depth<=.005)continue;
      sharedFoamFlow(wx,wz,t,couplingFlow);
+     const resolved=sampleFluid3(wx,sea-Math.min(.12,depth*.5),wz,couplingFluid);
+     const breaker=sampleBreakerHull(wx,wz,t,breakerHullScratch);
+     const ux=(resolved?couplingFluid.x*.65+couplingFlow.x*.35:couplingFlow.x)+breaker.x*.65;
+     const uz=(resolved?couplingFluid.z*.65+couplingFlow.z*.35:couplingFlow.z)+breaker.z*.65;
      const vx=fx*boatSpeed+hullSlipX+hullYawRate*dz,vz=fz*boatSpeed+hullSlipZ-hullYawRate*dx;
-     const un=Math.max(-4,Math.min(4,(vx-couplingFlow.x)*nx+(vz-couplingFlow.z)*nz));
-     const head=Math.max(-.16,Math.min(.42,un*Math.abs(un)/(2*9.81)));
-     // Moving wall drives a positive bow wave and a stern deficit. The
-     // same bounded head exerts an opposing reaction on the rigid body.
-     owForce[k]=Math.max(-12,Math.min(12,owForce[k]+un*1.45+head*2.5));
-     const pressure=1000*9.81*OW_H*.20*head*hullContact;
+     const un=(vx-ux)*nx+(vz-uz)*nz;
+     const head=hullDynamicHead(un,depth);
+     // Spread the pressure over adjacent wet cells rather than a one-cell spike.
+     for(let dj=-1;dj<=1;dj++)for(let di=-1;di<=1;di++){
+      const ii=i+di,jj=j+dj;if(ii<1||jj<1||ii>=OW_N-1||jj>=OW_N-1)continue;
+      const p=jj*OW_N+ii;if(owSolid[p])continue;
+      const w=(di===0&&dj===0)?1:.35;
+      hullPressureHead[p]+=head*w;hullPressureWeight[p]+=w;
+     }
+     // The same pressure head generates surface motion and hull resistance.
+     const pressure=1000*9.81*OW_H*depth*head;
      const px=-nx*pressure,pz=-nz*pressure;
      reactionX+=px;reactionZ+=pz;reactionYaw+=dz*px-dx*pz;peak=Math.max(peak,Math.abs(head));
+    }
+    for(let k=0;k<OW_SIZE;k++)if(hullPressureWeight[k]>0){
+     const head=hullPressureHead[k]/Math.max(1,hullPressureWeight[k]);
+     owForce[k]=Math.max(-12,Math.min(12,owForce[k]+(head-owH[k])*(head>=0?15:9)));
     }
     const cap=(v,m)=>Math.max(-m,Math.min(m,v));
     couplingX+=.35*(cap(reactionX,450)-couplingX);couplingZ+=.35*(cap(reactionZ,450)-couplingZ);
@@ -8800,4 +8824,4 @@ begin().catch(error=>{
 });
 </script>
 </body></html>
-<!-- GitHub Pages redeploy trigger for Water Lab 28.12.7 -->
+<!-- GitHub Pages redeploy trigger for Water Lab 28.12.8 -->

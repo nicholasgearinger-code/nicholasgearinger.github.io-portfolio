@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.10.0 Original ocean startup loading</title>
+<title>Rift Water Lab · WebGPU 28.10.1 Original ocean startup loading</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -87,6 +87,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 #controls .quickBar button{min-height:40px;white-space:normal}
 #settingsDrawer{left:auto;right:0;width:min(430px,calc(100vw - 24px));max-height:55vh}
 @media(max-width:640px){#joystick{width:112px;height:112px;bottom:calc(max(18px,env(safe-area-inset-bottom)) + 12px)}#controls{left:calc(max(18px,env(safe-area-inset-left)) + 124px)}#controls .quickBar button{font-size:11px;padding:7px 4px}}
+#hudPanel:not(:has(#diagnostics[open])) #frameProfile,#hudPanel:not(:has(#diagnostics[open])) #fluidHud{display:none}
 </style>
 <script type="importmap">
 {"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.187.0/build/three.webgpu.js","three/webgpu":"https://cdn.jsdelivr.net/npm/three@0.187.0/build/three.webgpu.js","three/tsl":"https://cdn.jsdelivr.net/npm/three@0.187.0/build/three.tsl.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.187.0/examples/jsm/"}}
@@ -108,9 +109,10 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.10.0</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.10.1</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
+  <div id="islandWaypoint" style="display:flex;align-items:center;gap:9px;padding:7px 0;color:#c5f5e9;font-size:13px"><span id="islandArrow" style="display:inline-block;font-size:22px;line-height:1;transform-origin:center">↑</span><span id="islandDistance">Island · locating</span></div>
   <div id="frameProfile" style="font-size:11px;line-height:1.4;color:#b5e4e8;margin:4px 0" role="status">Frame profiler: collecting</div>
   <div id="fluidHud" style="font-size:11px;line-height:1.35;color:#a9dce5;margin:4px 0;overflow-wrap:anywhere" role="status">3D fluid: initializing</div>
   <details id="diagnostics">
@@ -550,9 +552,9 @@ function createOceanMaterial(options){
       const active=upward.mul(wet).mul(depthFade).mul(undersideLensControls.z).mul(undersideLensControls.w);
       // Restore the previous fine lens appearance, retaining only a small
       // directional radiance contribution. Avoid a broad bright sky wash.
-      const previous=blueBase.add(oldLight.mul(.50).add(refined.mul(.92)).mul(upward).mul(wet).mul(depthFade).mul(undersideLensControls.z)).mul(undersideLensControls.w);
+      const previous=blueBase.add(oldLight.mul(.32).add(refined.mul(.68)).mul(upward).mul(wet).mul(depthFade).mul(undersideLensControls.z)).mul(undersideLensControls.w);
       const directional=interfaceLight.mul(eyeTransmission).mul(active);
-      result.assign(previous.mul(.80).add(directional.mul(.16)));
+      result.assign(previous.mul(.48).add(directional.mul(.38)));
      }else result.assign(blueBase.add(oldLight.mul(.58).add(refined.mul(.85)).mul(upward).mul(wet).mul(depthFade).mul(undersideLensControls.z)).mul(undersideLensControls.w));
     }else result.assign(blueBase.add(spectral.mul(illumination).add(incoming).mul(upward).mul(wet).mul(depthFade).mul(undersideLensControls.z)).mul(undersideLensControls.w));
    });
@@ -1169,9 +1171,9 @@ function updateUnderwaterScattering(){
   underwaterBackgroundColor.setRGB(tint.r*Math.exp(-a[0]*path),
     tint.g*Math.exp(-a[1]*path),tint.b*Math.exp(-a[2]*path));
   // No permanent bright color floor: ambient light fades with depth.
-  underwaterBackgroundColor.lerp(tint,.16*waterTransmittance(depth,.085,clarity));
+  underwaterBackgroundColor.lerp(tint,.07*waterTransmittance(depth,.12,clarity));
   // Deep water receives progressively less downwelling diffuse irradiance.
-  if(enhancedUnderwaterLight)underwaterBackgroundColor.multiplyScalar(Math.exp(-depth*.022*Math.max(0,depthAbsorption)/clarity));
+  if(enhancedUnderwaterLight)underwaterBackgroundColor.multiplyScalar(Math.exp(-depth*.038*Math.max(0,depthAbsorption)/clarity));
   const haze=Math.min(.16,opticalAir*.26)*waterTransmittance(depth,.11,clarity);
   underwaterBackgroundColor.r+=haze*.42;underwaterBackgroundColor.g+=haze*.72;underwaterBackgroundColor.b+=haze*.80;
   underwaterFog.color.set(0x9bcddf).lerp(underwaterBackgroundColor,underwaterBlend);
@@ -1183,7 +1185,7 @@ function updateUnderwaterScattering(){
    // penalties. A single camera-space fog acts on all scene materials.
    const targetDensity=(1/Math.max(8,visibilityRange))*
      (.50+.50*underwaterScatter)*Math.max(.15,distanceExtinction);
-   const depthFactor=1+Math.min(1.5,depth*.035*depthAbsorption)+opticalAir*1.6;
+   const depthFactor=1+Math.min(2,depth*.048*depthAbsorption)+opticalAir*1.6;
    underwaterFog.density=Math.max(.00005,Math.min(.14,
      targetDensity*1.10*depthFactor*Math.pow(underwaterBlend,1.5)/clarity));
   }else{
@@ -7631,7 +7633,9 @@ function bindCameraGestures(surface){
   cameraControlUntil=performance.now()+3500;
  },{passive:false});
 }
+let islandNavDirection;
 function updateCamera(dt){
+ if(!islandNavDirection)islandNavDirection=new THREE.Vector3();
  if(!boat)return;
  const actor=walkMode&&player?.visible?player:boat;
  const follow=1-Math.exp(-Math.max(dt,.001)*4);
@@ -8395,6 +8399,16 @@ async function init3D(forceWebGL=false){
   }
   profileMark=performance.now();
   updateCamera(dt);
+  if(boat&&camera){
+   const actor=walkMode&&player?.visible?player:boat;
+   const tx=0,tz=islandCoastZ(0)+20.18;
+   const dx=tx-actor.position.x,dz=tz-actor.position.z;
+   const distance=Math.hypot(dx,dz);
+   const forward=camera.getWorldDirection(islandNavDirection);
+   const angle=Math.atan2(dx,-dz)-Math.atan2(forward.x,-forward.z);
+   $('islandArrow').style.transform='rotate('+angle+'rad)';
+   $('islandDistance').textContent=distance<5?'Island · ashore / nearby':'Island · '+(distance>=1000?(distance/1000).toFixed(2)+' km':Math.round(distance)+' m');
+  }
   updateUnderwaterScattering();
   updateBreakerAeration(time);
   try{updateAerationCloud(time);}catch(error){if(aerationCloud)aerationCloud.visible=false;console.error('Aeration cloud',error);}
@@ -8535,4 +8549,4 @@ begin().catch(error=>{
 });
 </script>
 </body></html>
-<!-- GitHub Pages redeploy trigger for Water Lab 28.10.0 -->
+<!-- GitHub Pages redeploy trigger for Water Lab 28.10.1 -->

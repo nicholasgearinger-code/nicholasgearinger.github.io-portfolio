@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.11.1 Volumetric bubble clouds</title>
+<title>Rift Water Lab · WebGPU 28.11.2 Volumetric bubble clouds</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -109,7 +109,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.11.1</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.11.2</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="islandWaypoint" style="display:flex;align-items:center;gap:9px;padding:7px 0;color:#c5f5e9;font-size:13px"><span id="islandArrow" style="display:inline-block;font-size:22px;line-height:1;transform-origin:center">↑</span><span id="islandDistance">Island · locating</span></div>
@@ -3740,7 +3740,7 @@ function makeBubbleTexture(){
  for(let j=0;j<n;j++)for(let i=0;i<n;i++){
   const x=(i+.5)/n*2-1,y=(j+.5)/n*2-1,r=Math.hypot(x,y);
   const edge=Math.max(0,Math.min(1,(1-r)*10));
-  const rim=Math.exp(-Math.pow((r-.77)/.16,2));
+  const rim=Math.exp(-Math.pow((r-.83)/.095,2));
   const highlight=Math.exp(-((x+.28)**2+(y-.30)**2)*18);
   const k=(j*n+i)*4;
   data[k]=218+Math.round(37*highlight);data[k+1]=241;data[k+2]=255;
@@ -3754,48 +3754,54 @@ function updateBreakerAeration(t){
  if(!enabled){if(aerationPoints)for(const batch of aerationPoints)batch.visible=false;foamBubbles.length=0;foamBubbleTime=t;return;}
  if(!aerationPoints){
   foamBubbleTexture=makeBubbleTexture();
-  aerationPoints=[.035,.085,.17].map(size=>{
+  aerationPoints=[.012,.022,.038,.062,.095].map(size=>{
    const geo=new THREE.BufferGeometry();
    geo.setAttribute('position',new THREE.BufferAttribute(new Float32Array(220*3),3).setUsage(THREE.DynamicDrawUsage));
    geo.setAttribute('color',new THREE.BufferAttribute(new Float32Array(220*3),3).setUsage(THREE.DynamicDrawUsage));
    geo.setDrawRange(0,0);
    const points=new THREE.Points(geo,new THREE.PointsMaterial({color:0xffffff,vertexColors:true,map:foamBubbleTexture,
-    size,sizeAttenuation:true,transparent:true,opacity:.68,depthWrite:false,depthTest:true,fog:true}));
+    size,sizeAttenuation:true,transparent:true,opacity:.43,depthWrite:false,depthTest:true,fog:true}));
    points.frustumCulled=false;scene.add(points);return points;
   });
  }
  const dt=Math.max(0,Math.min(.05,t-foamBubbleTime));foamBubbleTime=t;
- const dir=waveComponents[0];
  for(let i=foamBubbles.length-1;i>=0;i--){
   const b=foamBubbles[i];b.age+=dt;
   sharedFoamFlow(b.x,b.z,t,foamBubbleFlow);
   const gpu=sampleFluid3(b.x,oceanHeight(b.x,b.z,t)-b.depth,b.z,foamBubbleFlow);
   b.x+=foamBubbleFlow.x*dt;
   b.z+=foamBubbleFlow.z*dt;
-  b.depth-=dt*(.14+b.kind*.18+(gpu?foamBubbleFlow.y:0));
+  const radius=b.radius*Math.cbrt((1+b.birthDepth/10.3)/(1+Math.max(0,b.depth)/10.3))*Math.sqrt(Math.max(0,1-b.age/b.life));
+  b.radiusNow=radius;
+  const rise=Math.min(.32, .025+radius*7);
+  const phase=b.seed*.618+t*(2.2+b.kind*.3);
+  b.x+=Math.sin(phase)*dt*.045;b.z+=Math.cos(phase*1.37)*dt*.045;
+  b.depth-=dt*(rise+(gpu?foamBubbleFlow.y:0));
   if(b.depth<.08||b.age>b.life||Math.hypot(b.x-boat.position.x,b.z-boat.position.z)>17)foamBubbles.splice(i,1);
  }
  // Sample volume concentrations, including the stern and hull sources.
  foamBubbleSpawn+=dt*75;
  const births=Math.min(12,Math.floor(foamBubbleSpawn));foamBubbleSpawn-=births;
- for(let i=0;i<births*4&&foamBubbles.length<540&&i<48;i++){
+ for(let i=0;i<births*4&&foamBubbles.length<(simTier===2?240:simTier===1?360:540)&&i<48;i++){
   const seed=++foamBubbleSeed;
   const angle=seed*2.399963,radius=Math.sqrt(bubbleHash(seed))*13;
   const x=boat.position.x+Math.cos(angle)*radius,z=boat.position.z+Math.sin(angle)*radius;
   const k=1+Math.floor(bubbleHash(seed+31)*(FOAM_LAYERS-1));
   const density=foamLayer(x,z,k,entrainedAir);
   if(density<.018||bubbleHash(seed+71)>Math.min(1,density*3))continue;
-  const q=bubbleHash(seed+19),kind=q<.57?0:q<.88?1:2;
-  foamBubbles.push({x,z,depth:(k+.25*bubbleHash(seed+7))*FOAM_DZ,kind,age:0,life:1.5+3*bubbleHash(seed+91)});
+  const q=bubbleHash(seed+19),kind=q<.43?0:q<.73?1:q<.90?2:q<.98?3:4;
+  const depth=(k+.25*bubbleHash(seed+7))*FOAM_DZ,radius=[.006,.011,.019,.031,.0475][kind];
+  foamBubbles.push({x,z,depth,birthDepth:depth,radius,radiusNow:radius,seed,kind,age:0,life:(1.2+kind*.45)*(1+bubbleHash(seed+91))});
  }
- const counts=[0,0,0];
+ const counts=[0,0,0,0,0];
  for(const b of foamBubbles){
-  const n=counts[b.kind];if(n>=220)continue;
-  const geo=aerationPoints[b.kind].geometry,p=geo.attributes.position.array,c=geo.attributes.color.array;
+  const kind=Math.max(0,Math.min(4,Math.round(Math.log(Math.max(.006,b.radiusNow)/.006)/Math.log(1.68))));
+  const n=counts[kind];if(n>=220)continue;
+  const geo=aerationPoints[kind].geometry,p=geo.attributes.position.array,c=geo.attributes.color.array;
   const surface=oceanHeight(b.x,b.z,t),fade=Math.min(1,b.age*5,Math.max(0,(b.life-b.age)*2),b.depth*8);
   const q=n*3;p[q]=b.x;p[q+1]=surface-b.depth;p[q+2]=b.z;
-  c[q]=.55+.40*fade;c[q+1]=.65+.35*fade;c[q+2]=.75+.25*fade;
-  counts[b.kind]++;
+  c[q]=.20+.48*fade;c[q+1]=.32+.48*fade;c[q+2]=.40+.48*fade;
+  counts[kind]++;
  }
  aerationPoints.forEach((batch,k)=>{batch.visible=counts[k]>0;batch.geometry.setDrawRange(0,counts[k]);batch.geometry.attributes.position.needsUpdate=true;batch.geometry.attributes.color.needsUpdate=true;});
 }
@@ -4165,10 +4171,12 @@ function updateBubbleVolume(t){
  if(!bubbleVolumeControls.value.w||t-bubbleVolumeLast<(simTier===2?.28:.16))return;
  bubbleVolumeLast=t;
  const pixels=bubbleVolumeAtlas.image.data;
+ const heights=new Float32Array(32*32);
+ for(let j=0;j<32;j++)for(let i=0;i<32;i++)heights[j*32+i]=oceanHeight(foamOriginX+i*2*FOAM_STEP,foamOriginZ+j*2*FOAM_STEP,t);
  for(let j=0;j<FOAM_GRID;j++)for(let i=0;i<FOAM_GRID;i++){
   const x=foamOriginX+i*FOAM_STEP,z=foamOriginZ+j*FOAM_STEP;
   const cell=j*FOAM_GRID+i;
-  const h=oceanHeight(foamOriginX+(i&~1)*FOAM_STEP,foamOriginZ+(j&~1)*FOAM_STEP,t);
+  const h=heights[(j>>1)*32+(i>>1)];
   let tau=0;
   for(let k=0;k<FOAM_LAYERS;k++){
    const gas=Math.max(0,Math.min(1,(entrainedAir[k*FOAM_PLANE+cell]-.065)*.85));
@@ -8634,4 +8642,4 @@ begin().catch(error=>{
 });
 </script>
 </body></html>
-<!-- GitHub Pages redeploy trigger for Water Lab 28.11.1 -->
+<!-- GitHub Pages redeploy trigger for Water Lab 28.11.2 -->

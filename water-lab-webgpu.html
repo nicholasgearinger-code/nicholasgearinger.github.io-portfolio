@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.11.3 Volumetric bubble clouds</title>
+<title>Rift Water Lab · WebGPU 28.11.4 Turbulent bubble transport</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -109,7 +109,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.11.3</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.11.4</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="islandWaypoint" style="display:flex;align-items:center;gap:9px;padding:7px 0;color:#c5f5e9;font-size:13px"><span id="islandArrow" style="display:inline-block;font-size:22px;line-height:1;transform-origin:center">↑</span><span id="islandDistance">Island · locating</span></div>
@@ -3733,7 +3733,7 @@ const breakerFlowScratch={x:0,z:0};
 // Persistent bubble tracers seeded from the shared six-layer aeration field.
 // Three point batches represent distinct bubble radii and rise speeds.
 let aerationPoints=null,foamBubbleTexture=null,foamBubbleTime=-1,foamBubbleSpawn=0;
-const foamBubbles=[],foamBubbleFlow={x:0,z:0};
+const foamBubbles=[],foamBubbleFlow={x:0,z:0},bubbleFluidScratch={x:0,y:0,z:0,curl:0},bubbleEddyScratch={};
 function bubbleHash(n){const v=Math.sin(n*127.1+17.7)*43758.5453;return v-Math.floor(v);}
 function makeBubbleTexture(){
  const n=48,data=new Uint8Array(n*n*4);
@@ -3767,17 +3767,39 @@ function updateBreakerAeration(t){
  const dt=Math.max(0,Math.min(.05,t-foamBubbleTime));foamBubbleTime=t;
  for(let i=foamBubbles.length-1;i>=0;i--){
   const b=foamBubbles[i];b.age+=dt;
+  // Integrate in world space: a passing wave must not teleport a submerged bubble.
+  if(!Number.isFinite(b.y))b.y=oceanHeight(b.x,b.z,t)-b.depth;
   sharedFoamFlow(b.x,b.z,t,foamBubbleFlow);
-  const gpu=sampleFluid3(b.x,oceanHeight(b.x,b.z,t)-b.depth,b.z,foamBubbleFlow);
-  b.x+=foamBubbleFlow.x*dt;
-  b.z+=foamBubbleFlow.z*dt;
+  const gpu=sampleFluid3(b.x,b.y,b.z,bubbleFluidScratch);
   const radius=b.radius*Math.cbrt((1+b.birthDepth/10.3)/(1+Math.max(0,b.depth)/10.3))*Math.sqrt(Math.max(0,1-b.age/b.life));
   b.radiusNow=radius;
-  const rise=Math.min(.32, .025+radius*7);
-  const phase=b.seed*.618+t*(2.2+b.kind*.3);
-  b.x+=Math.sin(phase)*dt*.045;b.z+=Math.cos(phase*1.37)*dt*.045;
-  b.depth-=dt*(rise+(gpu?foamBubbleFlow.y:0));
-  if(b.depth<.08||b.age>b.life||Math.hypot(b.x-boat.position.x,b.z-boat.position.z)>17)foamBubbles.splice(i,1);
+  const rise=Math.min(.32,.025+radius*7);
+  let fx=foamBubbleFlow.x,fz=foamBubbleFlow.z,fy=0,curl=0;
+  if(gpu){
+   fx=bubbleFluidScratch.x*.88+fx*.12;fz=bubbleFluidScratch.z*.88+fz*.12;
+   fy=bubbleFluidScratch.y;curl=Math.min(3,Math.abs(bubbleFluidScratch.curl||0));
+  }else{
+   // Continue resolved horizontal circulation outside the local 3D GPU window.
+   evaluateVortices(b.x,b.z,bubbleEddyScratch);
+   fx+=bubbleEddyScratch.x*.24;fz+=bubbleEddyScratch.z*.24;
+   curl=Math.min(3,Math.abs(bubbleEddyScratch.air)*2);
+  }
+  // Correlated subgrid fluctuations scale with local circulation, not random frame jitter.
+  const phase=b.seed*.618+t*(1.8+b.kind*.24);
+  const wobble=(.018+.065*curl)/(1+b.kind*.22);
+  const tx=fx+Math.sin(phase+1.7*Math.sin(b.z*.63+t*.8))*wobble;
+  const tz=fz+Math.cos(phase*1.37+1.1*Math.sin(b.x*.71-t*.6))*wobble;
+  const ty=fy+rise+Math.sin(phase*.79)*wobble*.38;
+  // Small bubbles closely follow fluid; larger pockets retain more inertia.
+  const response=1-Math.exp(-dt/(.055+radius*3.5));
+  b.vx+=(Math.max(-3,Math.min(3,tx))-b.vx)*response;
+  b.vy+=(Math.max(-1.8,Math.min(1.8,ty))-b.vy)*response;
+  b.vz+=(Math.max(-3,Math.min(3,tz))-b.vz)*response;
+  b.x+=b.vx*dt;b.y+=b.vy*dt;b.z+=b.vz*dt;
+  b.depth=oceanHeight(b.x,b.z,t)-b.y;
+  const ground=-seabedDepth(b.x,b.z);
+  if(b.y<ground+.045){b.y=ground+.045;b.vy=Math.max(0,b.vy);}
+  if(b.depth<.035||b.age>b.life||Math.hypot(b.x-boat.position.x,b.z-boat.position.z)>17||b.depth>3.2)foamBubbles.splice(i,1);
  }
  // Sample volume concentrations, including the stern and hull sources.
  foamBubbleSpawn+=dt*75;
@@ -3791,15 +3813,17 @@ function updateBreakerAeration(t){
   if(density<.018||bubbleHash(seed+71)>Math.min(1,density*3))continue;
   const q=bubbleHash(seed+19),kind=q<.43?0:q<.73?1:q<.90?2:q<.98?3:4;
   const depth=(k+.25*bubbleHash(seed+7))*FOAM_DZ,radius=[.006,.011,.019,.031,.0475][kind];
-  foamBubbles.push({x,z,depth,birthDepth:depth,radius,radiusNow:radius,seed,kind,age:0,life:(1.2+kind*.45)*(1+bubbleHash(seed+91))});
+  const y=oceanHeight(x,z,t)-depth;
+  if(y< -seabedDepth(x,z)+.045)continue;
+  foamBubbles.push({x,y,z,vx:0,vy:0,vz:0,depth,birthDepth:depth,radius,radiusNow:radius,seed,kind,age:0,life:(1.2+kind*.45)*(1+bubbleHash(seed+91))});
  }
  const counts=[0,0,0,0,0];
  for(const b of foamBubbles){
   const kind=Math.max(0,Math.min(4,Math.round(Math.log(Math.max(.006,b.radiusNow)/.006)/Math.log(1.68))));
   const n=counts[kind];if(n>=220)continue;
   const geo=aerationPoints[kind].geometry,p=geo.attributes.position.array,c=geo.attributes.color.array;
-  const surface=oceanHeight(b.x,b.z,t),fade=Math.min(1,b.age*5,Math.max(0,(b.life-b.age)*2),b.depth*8);
-  const q=n*3;p[q]=b.x;p[q+1]=surface-b.depth;p[q+2]=b.z;
+  const fade=Math.min(1,b.age*5,Math.max(0,(b.life-b.age)*2),b.depth*8);
+  const q=n*3;p[q]=b.x;p[q+1]=b.y;p[q+2]=b.z;
   c[q]=.20+.48*fade;c[q+1]=.32+.48*fade;c[q+2]=.40+.48*fade;
   counts[kind]++;
  }
@@ -8642,4 +8666,4 @@ begin().catch(error=>{
 });
 </script>
 </body></html>
-<!-- GitHub Pages redeploy trigger for Water Lab 28.11.3 -->
+<!-- GitHub Pages redeploy trigger for Water Lab 28.11.4 -->

@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.11.4 Turbulent bubble transport</title>
+<title>Rift Water Lab · WebGPU 28.11.5 Breaking-wave aeration</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -109,7 +109,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.11.4</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.11.5</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="islandWaypoint" style="display:flex;align-items:center;gap:9px;padding:7px 0;color:#c5f5e9;font-size:13px"><span id="islandArrow" style="display:inline-block;font-size:22px;line-height:1;transform-origin:center">↑</span><span id="islandDistance">Island · locating</span></div>
@@ -3830,6 +3830,21 @@ function updateBreakerAeration(t){
  aerationPoints.forEach((batch,k)=>{batch.visible=counts[k]>0;batch.geometry.setDrawRange(0,counts[k]);batch.geometry.attributes.position.needsUpdate=true;batch.geometry.attributes.color.needsUpdate=true;});
 }
 let foamBubbleSeed=0;
+function emitPlungeBubbles(e,t){
+ if(!underwaterActive||foamStrength<.01)return;
+ const cap=simTier===2?240:simTier===1?360:540;
+ const count=Math.ceil((simTier===2?12:simTier===1?20:28)*e.energy);
+ for(let i=0;i<count&&foamBubbles.length<cap;i++){
+  const seed=++foamBubbleSeed,along=bubbleHash(seed+3)*.8,side=(bubbleHash(seed+9)-.5)*1.4;
+  const x=e.x+e.fx*along+e.fz*side,z=e.z+e.fz*along-e.fx*side;
+  const depth=.12+Math.pow(bubbleHash(seed+17),1.5)*Math.min(1.65,.5+e.energy*1.7);
+  const y=oceanHeight(x,z,t)-depth;
+  if(y< -seabedDepth(x,z)+.08)continue;
+  const q=bubbleHash(seed+19),kind=q<.52?0:q<.78?1:q<.94?2:q<.99?3:4;
+  const radius=[.006,.011,.019,.031,.0475][kind];
+  foamBubbles.push({x,y,z,vx:e.fx*.6,vz:e.fz*.6,vy:-.25-e.energy*.6,depth,birthDepth:depth,radius,radiusNow:radius,seed,kind,age:0,life:2+bubbleHash(seed+91)*2.8});
+ }
+}
 // Bounded ballistic droplets and fine spray, coupled to surface impacts.
 const whitewaterSpray=[],sprayImpacts=[],sprayFlow={x:0,z:0};
 // Contact events are emitted by wet hull probes, not by airborne motion.
@@ -5368,9 +5383,11 @@ function advanceFoamDensity(dt,t){
  for(const e of entryAirQueue){
   const ix=Math.round((e.x-ox)/FOAM_STEP),iz=Math.round((e.z-oz)/FOAM_STEP);
   for(let j=Math.max(0,iz-3);j<=Math.min(FOAM_GRID-1,iz+3);j++)for(let i=Math.max(0,ix-3);i<=Math.min(FOAM_GRID-1,ix+3);i++){
-   const weight=e.energy*.48*Math.exp(-((i-ix)**2+(j-iz)**2)*.30);
+   const dx=(i-ix)*FOAM_STEP,dz=(j-iz)*FOAM_STEP;
+   const along=e.plunge?dx*e.fx+dz*e.fz:0,side=e.plunge?dx*e.fz-dz*e.fx:0;
+   const weight=e.plunge?e.energy*.58*Math.exp(-((along-.42)**2/.95+side*side/.48)):e.energy*.48*Math.exp(-((i-ix)**2+(j-iz)**2)*.30);
    for(let k=0;k<FOAM_LAYERS;k++){
-    const p=k*FOAM_PLANE+j*FOAM_GRID+i,profile=Math.exp(-((k-1.5)**2)/3.5);
+    const p=k*FOAM_PLANE+j*FOAM_GRID+i,profile=e.plunge?Math.exp(-((k-(1.2+e.energy*2))**2)/2.7):Math.exp(-((k-1.5)**2)/3.5);
     airNext[p]=Math.min(.85,airNext[p]+weight*profile);if(gpuTurbulence)turbulenceForcing[p*12+11]+=weight*profile;if(turbulenceEnabled){const impulse=weight*profile*2;turbulenceNext[p]=Math.min(3,turbulenceNext[p]+impulse);if(gpuTurbulence)turbulenceForcing[p*12+3]+=impulse;}
     foamNext[p]=Math.min(1,foamNext[p]+weight*profile*.25);if(k===0)breakerNext[j*FOAM_GRID+i]=Math.min(1,breakerNext[j*FOAM_GRID+i]+weight*.8);
    }
@@ -5881,7 +5898,7 @@ function updatePlunges(dt,t){
    for(let k=-1;k<=1;k++){
     const x=p.x+p.fx*p.height+p.fz*k*p.width*.22,z=p.z+p.fz*p.height-p.fx*k*p.width*.22;
     const e={x,z,energy:Math.min(.7,p.height*.4),age:0,fx:p.fx,fz:p.fz,plunge:true};
-    entryEvents.push(e);entryAirQueue.push({...e});spawnFoamParcel(x,z,Math.min(1,e.energy*1.8)*foamStrength,p.fx*p.speed*.35,p.fz*p.speed*.35);for(let n=0;n<4;n++)emitWhitewater(x,z,t,e.energy*1.8,p.fx,p.fz);
+    entryEvents.push(e);entryAirQueue.push({...e});emitPlungeBubbles(e,t);spawnFoamParcel(x,z,Math.min(1,e.energy*1.8)*foamStrength,p.fx*p.speed*.35,p.fz*p.speed*.35);for(let n=0;n<4;n++)emitWhitewater(x,z,t,e.energy*1.8,p.fx,p.fz);
    }
    while(entryEvents.length>12)entryEvents.shift();while(entryAirQueue.length>12)entryAirQueue.shift();
   }
@@ -8666,4 +8683,4 @@ begin().catch(error=>{
 });
 </script>
 </body></html>
-<!-- GitHub Pages redeploy trigger for Water Lab 28.11.4 -->
+<!-- GitHub Pages redeploy trigger for Water Lab 28.11.5 -->

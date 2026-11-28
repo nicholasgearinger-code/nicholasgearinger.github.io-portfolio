@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.10.3 Original ocean startup loading</title>
+<title>Rift Water Lab · WebGPU 28.10.4 Original ocean startup loading</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -109,7 +109,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.10.3</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.10.4</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="islandWaypoint" style="display:flex;align-items:center;gap:9px;padding:7px 0;color:#c5f5e9;font-size:13px"><span id="islandArrow" style="display:inline-block;font-size:22px;line-height:1;transform-origin:center">↑</span><span id="islandDistance">Island · locating</span></div>
@@ -1673,7 +1673,19 @@ function createUnderwaterReceiver(options){
    const roughness=Number.isFinite(options.roughness)?options.roughness:.9;
    const spec=n.dot(halfVector).max(0).pow(8+24*(1-roughness)).mul(.10*(1-roughness)+.025);
    const diffuse=visibleObjectCaustics?materialColor.rgb.mul(.60).add(vec3(.40)):materialColor.rgb.mul(.85).add(vec3(.15));
-   mat.emissiveNode=materialEmissive.add(irradiance.mul(diffuse.mul(1.35).add(vec3(spec))));
+   // Hemispherical underwater irradiance: downwelling sky and weaker
+   // upwelling water/bed bounce, attenuated at the receiver itself.
+   const waterPath=surface.sub(positionWorld.y).max(0).div(u.controls.z).mul(u.controls.w.max(0));
+   const down=vec3(.13,.31,.43).mul(vec3(.095,.037,.019).mul(waterPath.negate()).exp());
+   const bounce=vec3(.035,.115,.145).mul(vec3(.14,.055,.029).mul(waterPath.negate()).exp());
+   const hemi=n.y.mul(.5).add(.5).clamp(0,1);
+   const ambient=down.mul(hemi).add(bounce.mul(float(1).sub(hemi)));
+   const direct=n.dot(localSun).max(0);
+   const solar=vec3(.72,.86,.94).mul(vec3(.085,.029,.014).mul(waterPath.negate()).exp()).mul(direct).mul(visibility).mul(solid).mul(.22);
+   const grazing=float(1).sub(n.dot(v).abs().clamp(0,1)).pow(5);
+   const reflected=down.mul(grazing.mul(.08).add(spec.mul(.45)));
+   const immersedLight=ambient.add(solar).mul(materialColor.rgb.mul(.85).add(vec3(.15))).add(reflected).mul(submerged);
+   mat.emissiveNode=materialEmissive.add(irradiance.mul(diffuse.mul(1.35).add(vec3(spec)))).add(immersedLight);
   }else mat.emissiveNode=materialEmissive.add(irradiance.mul(materialColor.rgb.mul(.40).add(vec3(.60))));
   mat.userData.projectedCaustics=true;return mat;
  }catch(e){mat?.dispose();console.warn('Projected object caustics fallback',e);return new THREE.MeshStandardMaterial(options);}
@@ -8551,4 +8563,4 @@ begin().catch(error=>{
 });
 </script>
 </body></html>
-<!-- GitHub Pages redeploy trigger for Water Lab 28.10.3 -->
+<!-- GitHub Pages redeploy trigger for Water Lab 28.10.4 -->

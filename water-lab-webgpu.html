@@ -7409,6 +7409,7 @@ function stepBoat(dt,t){
   boat.position.x+=(-Math.sin(boatHeading)*boatSpeed+hullSlipX)*h;
   boat.position.z+=(-Math.cos(boatHeading)*boatSpeed+hullSlipZ)*h;
   resolveIslandBoatCollision(priorBoatX,priorBoatZ);
+  resolveShallowBoatGrounding(priorBoatX,priorBoatZ);
   totalTravel+=Math.hypot(boatSpeed,sideBound)*h;
   // Reserve buoyancy represents enclosed displacement when the deck is awash.
   // It is a bounded safety force, not a position snap.

@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.12.1 Gravity-driven crest overturning</title>
+<title>Rift Water Lab · WebGPU 28.12.2 Organic crest evolution</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -109,7 +109,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.12.1</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.12.2</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="islandWaypoint" style="display:flex;align-items:center;gap:9px;padding:7px 0;color:#c5f5e9;font-size:13px"><span id="islandArrow" style="display:inline-block;font-size:22px;line-height:1;transform-origin:center">↑</span><span id="islandDistance">Island · locating</span></div>
@@ -5812,21 +5812,23 @@ function crestFold(along,side,p,out){
  if(Math.abs(along)>=L||Math.abs(side)>=half)return false;
  const u=along/L,edge=1-u*u,span=1-(side/half)**2;
  // A tapered Lagrangian crest: the rear face feeds a gravity-driven lip.
- const rise=Math.min(1,a/.28),ramp=rise*rise*(3-2*rise);
- const decay=Math.max(0,Math.min(1,(1-a)/.26));
- const w=edge*edge*span*span*ramp;
- const q=(u+.16)/.36,bell=Math.exp(-q*q);
- const launch=.32*p.life,flight=Math.max(0,p.age-launch);
+ const smooth=v=>{v=Math.max(0,Math.min(1,v));return v*v*(3-2*v);};
+ const ramp=smooth(a/.36),decay=smooth((1-a)/.34);
+ // Uneven crest sections roll at slightly different phases without frame noise.
+ const s=side/half,phaseOffset=.065*Math.sin(s*4.3+(p.shapePhase||0))+.035*Math.sin(s*8.1-(p.shapePhase||0));
+ const localAge=Math.max(0,a+phaseOffset*span);
+ const w=edge*edge*span*span*ramp*decay;
+ const q=(u+.16+.07*Math.sin(s*3.4+(p.shapePhase||0)))/.43,bell=Math.exp(-q*q);
+ const flight=Math.max(0,(localAge-.32)*p.life);
  const lipSpeed=Math.sqrt(9.81*H)*.72;
  const tipHeight=H*.94+Math.sqrt(9.81*H)*.48*flight-4.905*flight*flight;
  const travel=Math.min(H*1.9,lipSpeed*flight);
- const collapse=p.hit?decay:1;
+ const jetMix=smooth((localAge-.25)/.22);
  const shoulder=H*w*(.22+.78*Math.exp(-((u+.32)**2)/.23));
- const jetWeight=bell*w;
- out.forward=travel*jetWeight*collapse;
- out.up=(shoulder*(1-.65*bell)+Math.max(0,tipHeight)*jetWeight)*collapse;
- if(a<.32)out.up=shoulder;
- if(p.hit)out.up*=Math.max(.12,decay);
+ // Base FFT swell already carries the bulk of wave elevation; fold only the excess lip.
+ const residual=p.hit?Math.exp(-Math.max(0,p.age-(p.impactAge??p.age))*3):1;
+ out.forward=travel*bell*w*.70*jetMix*residual;
+ out.up=(shoulder*(1-jetMix)+jetMix*(shoulder*(1-.65*bell)+Math.max(0,tipHeight)*bell*w))*.46*residual;
  return true;
 }
 const crestOffset={forward:0,up:0};
@@ -5843,7 +5845,7 @@ function sampleBreakerHull(x,z,t,out){
   const front=lip+breakerFoldScratch.forward;
   const envelope=Math.exp(-((along-front)**2)/(.55+p.height*.6))*span*span;
   const active=crestFoamPhase(a),collapse=p.hit?Math.max(0,(1-a)/.35):0;
-  out.height+=breakerFoldScratch.up*envelope*.42;
+  out.height+=breakerFoldScratch.up*envelope*.55;
   const momentum=p.speed*envelope*active*(.22+.38*collapse);
   out.x+=p.fx*momentum;out.z+=p.fz*momentum;
   const flight=Math.max(0,p.age-.32*p.life);
@@ -5906,7 +5908,7 @@ function updatePlunges(dt,t){
  plungeClock+=dt;
  if(plungeClock>.55&&plungePool.length<budget){
   plungeClock=0;
-  let best=null,bestScore=.115;
+  let best=null,bestScore=.19;
   for(let k=0;k<40;k++){
    const seed=++plungeSeed,a=seed*2.39996323,r=3.5+((seed*37)%97)/97*7.5;
    const x=boat.position.x+Math.cos(a)*r,z=boat.position.z+Math.sin(a)*r;
@@ -5915,12 +5917,12 @@ function updatePlunges(dt,t){
    const localDepth=seabedDepth(x,z);if(localDepth<.22)continue;
    const shoal=Math.max(0,Math.min(1,(Math.max(0,w.height)*2/Math.max(.3,localDepth)-.42)/.36));
    const score=(w.compression*.85+slope*.28+shoal*.22)*Math.max(0,Math.min(1,(w.height+.35)/1.1))*breakingIntensity;
-   if(score>bestScore){bestScore=score;best={x,z,score};}
+   if(score>bestScore&&w.height>.12){bestScore=score;best={x,z,score,crest:w.height,depth:localDepth};}
   }
   if(best){
    let d=waveComponents[0],strength=-Infinity;
    for(const w of waveComponents){const v=w.amplitude*Math.sin(w.kx*best.x+w.kz*best.z-w.omega*t+w.phase);if(v>strength){strength=v;d=w;}}
-   plungePool.push({active:true,x:best.x,z:best.z,fx:d.dirX,fz:d.dirZ,age:0,life:2.6,height:Math.min(1.5,.65+best.score*2)*Math.min(1.25,Math.max(.55,waveHeight/1.5)),width:7+best.score*3,speed:Math.min(4.2,d.omega/Math.hypot(d.kx,d.kz)),hit:false});
+   plungePool.push({active:true,x:best.x,z:best.z,fx:d.dirX,fz:d.dirZ,age:0,life:2.6,height:Math.max(.18,Math.min(1.15,best.crest*.65+best.score*.35,best.depth*.55)),width:Math.min(9,Math.max(3.5,4+best.score*5)),shapePhase:plungeSeed*2.399963,speed:Math.min(4.2,d.omega/Math.hypot(d.kx,d.kz)),hit:false});
   }
  }
  for(let i=plungePool.length-1;i>=0;i--){
@@ -5935,11 +5937,11 @@ function updatePlunges(dt,t){
   const flight=Math.max(0,p.age-.32*p.life);
   const tipHeight=p.height*.94+Math.sqrt(9.81*p.height)*.48*flight-4.905*flight*flight;
   if(!p.hit&&a>.36&&(tipHeight<=.06||a>.83)){
-   p.hit=true;plungeImpacts++;
+   p.hit=true;p.impactAge=p.age;plungeImpacts++;
    for(let k=-1;k<=1;k++){
     const side=k*p.width*.22,root=-.16*Math.max(1.25,p.height*1.8);
     crestFold(root,side,p,breakerFoldScratch);
-    const landing=root+Math.min(p.height*1.9,Math.sqrt(9.81*p.height)*.72*flight)+travelSpeed*.08;
+    const landing=root+Math.min(p.height*1.9,Math.sqrt(9.81*p.height)*.72*flight)*.70+travelSpeed*.08;
     const x=p.x+p.fx*landing+p.fz*side,z=p.z+p.fz*landing-p.fx*side;
     if(seabedDepth(x,z)<.18)continue;
     const impactSpeed=Math.max(0,9.81*flight-Math.sqrt(9.81*p.height)*.48);
@@ -8730,4 +8732,4 @@ begin().catch(error=>{
 });
 </script>
 </body></html>
-<!-- GitHub Pages redeploy trigger for Water Lab 28.12.1 -->
+<!-- GitHub Pages redeploy trigger for Water Lab 28.12.2 -->

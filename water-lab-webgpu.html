@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.11.0 Volumetric bubble clouds</title>
+<title>Rift Water Lab · WebGPU 28.11.1 Volumetric bubble clouds</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -109,7 +109,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.11.0</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.11.1</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="islandWaypoint" style="display:flex;align-items:center;gap:9px;padding:7px 0;color:#c5f5e9;font-size:13px"><span id="islandArrow" style="display:inline-block;font-size:22px;line-height:1;transform-origin:center">↑</span><span id="islandDistance">Island · locating</span></div>
@@ -4162,15 +4162,16 @@ const bubbleVolumeEnabled=!new URLSearchParams(location.search).has('noBubbleVol
 function updateBubbleVolume(t){
  if(!bubbleVolumeAtlas)return;
  bubbleVolumeControls.value.w=underwaterActive&&foamFieldReady&&breakingMode==='advanced'?Math.min(1,foamStrength)*underwaterBlend:0;
- if(!bubbleVolumeControls.value.w||t-bubbleVolumeLast<(simTier===2?.18:.09))return;
+ if(!bubbleVolumeControls.value.w||t-bubbleVolumeLast<(simTier===2?.28:.16))return;
  bubbleVolumeLast=t;
  const pixels=bubbleVolumeAtlas.image.data;
  for(let j=0;j<FOAM_GRID;j++)for(let i=0;i<FOAM_GRID;i++){
   const x=foamOriginX+i*FOAM_STEP,z=foamOriginZ+j*FOAM_STEP;
-  const h=oceanHeight(x,z,t),cell=j*FOAM_GRID+i;
+  const cell=j*FOAM_GRID+i;
+  const h=oceanHeight(foamOriginX+(i&~1)*FOAM_STEP,foamOriginZ+(j&~1)*FOAM_STEP,t);
   let tau=0;
   for(let k=0;k<FOAM_LAYERS;k++){
-   const gas=Math.max(0,Math.min(1,(entrainedAir[k*FOAM_PLANE+cell]-.018)*1.4));
+   const gas=Math.max(0,Math.min(1,(entrainedAir[k*FOAM_PLANE+cell]-.065)*.85));
    const p=(k*FOAM_PLANE+cell)*4;
    pixels[p]=Math.round(gas*255);
    pixels[p+1]=Math.round(Math.exp(-tau-gas*.65)*255);
@@ -8156,14 +8157,15 @@ function buildVolumeMarch(composed,sceneDepth){
    const point=origin.add(ray.mul(distance));
    const field=sampleLightField(point);
    if(bubbleVolumeEnabled){
-    If(bubbleVolumeControls.w.greaterThan(.001),()=>{
+    If(bubbleVolumeControls.w.greaterThan(.001).and(point.y.greaterThan(-4)).and(point.y.lessThan(2)).and(point.x.sub(bubbleVolumeControls.x).div(FOAM_SPAN).sub(.5).abs().lessThan(.5)).and(point.z.sub(bubbleVolumeControls.y).div(FOAM_SPAN).sub(.5).abs().lessThan(.5)),()=>{
      const gas=sampleBubbleVolume(point);
-     const extinction=gas.density.mul(4.8);
-     const slice=float(1).sub(extinction.mul(step).negate().exp());
-     const illumination=gas.sun.mul(.68).add(.22).mul(solidLightVisibility(point).mul(.65).add(.35));
+     const extinction=gas.density.mul(1.65);
+     const slice=float(1).sub(extinction.mul(step.min(.65)).negate().exp());
+     const illumination=gas.sun.mul(.68).add(.22);
      const tint=vec3(.84,.96,1).mul(distance.mul(vec3(-.10,-.035,-.018)).exp());
      bubbleRadiance.addAssign(tint.mul(illumination).mul(slice).mul(bubbleTransmission));
      bubbleTransmission.mulAssign(float(1).sub(slice));
+     bubbleTransmission.assign(bubbleTransmission.max(.48));
     });
    }
    const depth=point.y.negate().max(0);
@@ -8632,4 +8634,4 @@ begin().catch(error=>{
 });
 </script>
 </body></html>
-<!-- GitHub Pages redeploy trigger for Water Lab 28.11.0 -->
+<!-- GitHub Pages redeploy trigger for Water Lab 28.11.1 -->

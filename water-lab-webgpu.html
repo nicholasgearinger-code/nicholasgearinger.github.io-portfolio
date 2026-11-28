@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.9.4 Unified joystick controls</title>
+<title>Rift Water Lab · WebGPU 28.9.5 Animated startup loading</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -69,15 +69,45 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
  #settingsDrawer{max-height:60vh}
  #controls .quickBar button{font-size:12px;padding:8px 7px}
 }
+#startupLoader{position:fixed;inset:0;z-index:9999;display:grid;place-items:center;overflow:hidden;background:linear-gradient(180deg,#082d40 0%,#07516a 54%,#031c2b 100%);opacity:1;visibility:visible;transition:opacity .55s ease,visibility .55s ease}
+#startupLoader.done{opacity:0;visibility:hidden;pointer-events:none}
+#startupLoader .loaderGlow{position:absolute;inset:0;background:radial-gradient(ellipse at 50% 42%,#2b9bb633,transparent 55%);pointer-events:none}
+#startupLoader .waveLayer{position:absolute;left:-25%;width:150%;height:34%;bottom:-10%;border-radius:44% 56% 0 0/22% 28% 0 0;opacity:.58;filter:drop-shadow(0 -5px 16px #7deeff25);background:linear-gradient(180deg,#55d4dfaa,#087d9bcc 48%,#03465f);animation:loaderWave 8s ease-in-out infinite alternate}
+#startupLoader .waveLayer.w2{height:28%;bottom:-13%;opacity:.55;background:linear-gradient(180deg,#9af4ef88,#168da5 55%,#06364c);animation:loaderWave2 11s ease-in-out infinite alternate}
+#startupLoader .waveLayer.w3{height:21%;bottom:-15%;opacity:.45;background:linear-gradient(180deg,#c1fff055,#0b5d79 60%,#031c2b);animation:loaderWave 13s ease-in-out infinite alternate-reverse}
+@keyframes loaderWave{from{transform:translateX(-4%) rotate(-2deg)}to{transform:translateX(4%) rotate(2deg)}}
+@keyframes loaderWave2{from{transform:translateX(5%) rotate(2deg)}to{transform:translateX(-5%) rotate(-2deg)}}
+#startupCard{position:relative;z-index:2;width:min(390px,calc(100vw - 42px));padding:26px 24px 24px;border:1px solid #9beaf044;border-radius:22px;background:#06283bd9;box-shadow:0 18px 60px #001a;backdrop-filter:blur(12px);text-align:center;margin-top:-5vh}
+#startupCard .brand{font-size:12px;letter-spacing:.2em;text-transform:uppercase;color:#9cecf0;font-weight:700}
+#startupCard h2{font-size:24px;letter-spacing:.01em;margin:9px 0 5px;color:#efffff}
+#startupStage{font-size:13px;color:#c0e9ee;min-height:20px;margin:0 0 17px}
+#startupTrack{height:9px;border-radius:20px;background:#061722;overflow:hidden;border:1px solid #7edbe455;box-shadow:inset 0 1px 4px #001}
+#startupFill{height:100%;width:0%;border-radius:20px;background:linear-gradient(90deg,#49c7d5,#a7fff0);box-shadow:0 0 15px #61f2e5aa;transition:width .35s ease}
+#startupMeta{display:flex;justify-content:space-between;align-items:center;margin-top:10px;color:#9bcbd4;font-size:11px;font-variant-numeric:tabular-nums}
+#startupPercent{font-size:13px;font-weight:700;color:#e2ffff}
+@media(prefers-reduced-motion:reduce){#startupLoader .waveLayer{animation:none}#startupFill{transition:none}}
 </style>
 <script type="importmap">
 {"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.187.0/build/three.webgpu.js","three/webgpu":"https://cdn.jsdelivr.net/npm/three@0.187.0/build/three.webgpu.js","three/tsl":"https://cdn.jsdelivr.net/npm/three@0.187.0/build/three.tsl.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.187.0/examples/jsm/"}}
 </script></head>
 <body>
+<div id="startupLoader" role="status" aria-live="polite" aria-label="Loading Rift Water Lab">
+ <div class="loaderGlow"></div><div class="waveLayer"></div><div class="waveLayer w2"></div><div class="waveLayer w3"></div>
+ <div id="startupCard"><div class="brand">Rift Islands · Water Lab</div><h2>Preparing the ocean</h2><p id="startupStage">Starting graphics engine…</p>
+  <div id="startupTrack" role="progressbar" aria-label="Loading progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="2"><div id="startupFill"></div></div>
+  <div id="startupMeta"><span>WEBGPU · REAL-TIME WATER</span><span id="startupPercent">2%</span></div>
+ </div>
+</div>
+<script>
+(()=>{let value=2,finished=false;const root=document.getElementById('startupLoader'),fill=document.getElementById('startupFill'),stage=document.getElementById('startupStage'),track=document.getElementById('startupTrack'),pct=document.getElementById('startupPercent');
+ const paint=()=>{if(!root)return;fill.style.width=value+'%';pct.textContent=Math.round(value)+'%';track.setAttribute('aria-valuenow',String(Math.round(value)));};
+ window.__waterLoading={progress:(n,label)=>{if(finished)return;value=Math.max(value,Math.min(96,n));if(label)stage.textContent=label;paint();},message:m=>{if(!finished&&stage)stage.textContent=m;},complete:()=>{if(finished)return;finished=true;value=100;stage.textContent='Ocean ready';paint();setTimeout(()=>root.classList.add('done'),260);setTimeout(()=>root.remove(),1000);},fail:m=>{if(stage)stage.textContent=m||'Unable to initialize graphics. Please reload.';if(pct)pct.textContent='—';}};paint();
+})();
+</script>
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.9.4</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.9.5</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="frameProfile" style="font-size:11px;line-height:1.4;color:#b5e4e8;margin:4px 0" role="status">Frame profiler: collecting</div>
@@ -596,7 +626,7 @@ let paused=false,detailIndex=1,samples=0,last=performance.now(),
 let adaptivePerformance=!safeStartup,adaptivePixelRatio=renderScale,
  adaptiveLastChange=performance.now(),adaptiveLowWindows=0,adaptiveHighWindows=0;
 const levels=[64,88,112];let isWebGPU=false,clockTime=0,loopActive=false;
-function status(m){window.__waterFallback?.notice(m);}
+function status(m){window.__waterFallback?.notice(m);window.__waterLoading?.message(m);}
 // A concentric two-zone mesh has no overlapping opaque water surface.
 // The inner disk is finely tessellated around the boat; the outer annulus
 // carries inexpensive swells. Their shared radius is exactly 16 metres.
@@ -8196,16 +8226,20 @@ function createSkyDome(){
  skyDome=new THREE.Mesh(g,material);skyDome.frustumCulled=false;skyDome.renderOrder=-10;scene.add(skyDome);
 }
 async function init3D(forceWebGL=false){
+ window.__waterLoading?.progress(forceWebGL?24:18,forceWebGL?'Loading WebGL fallback…':'Loading WebGPU engine…');
  status((forceWebGL?'WebGL fallback':'WebGPU probe')+': loading Three.js…');
  // Dynamic imports let us display errors if a module or CDN request fails.
  THREE=forceWebGL?await import('https://cdn.jsdelivr.net/npm/three@0.187.0/build/three.module.js'):await import('three/webgpu');
+ window.__waterLoading?.progress(34,'Creating graphics renderer…');
  renderer=forceWebGL?new THREE.WebGLRenderer({antialias:!safeStartup,powerPreference:'high-performance'}):
    new THREE.WebGPURenderer({antialias:!safeStartup,powerPreference:'high-performance',forceWebGL:false});
  renderer.setPixelRatio(Math.min(devicePixelRatio,renderScale));
  renderer.setSize(innerWidth,innerHeight);
  renderer.outputColorSpace=THREE.SRGBColorSpace;
  renderer.toneMapping=THREE.ACESFilmicToneMapping;
+ window.__waterLoading?.progress(43,'Compiling graphics pipeline…');
  if(typeof renderer.init==='function')await renderer.init();
+ window.__waterLoading?.progress(57,'Initializing fluid simulation…');
  if(!forceWebGL)initFluid3();else fluid3State='WebGL fallback';
  const backend=forceWebGL?'WebGLRenderer':renderer.backend?.constructor?.name||'WebGPU (unknown backend)';
  isWebGPU=!forceWebGL&&/webgpu/i.test(backend);
@@ -8215,6 +8249,7 @@ async function init3D(forceWebGL=false){
   try{oceanTSL=await import('three/tsl');}catch(e){console.warn('Angle optics unavailable',e);}
  }
  $('backend').textContent='Backend: '+backend;
+ window.__waterLoading?.progress(65,'Building island, shoreline and ocean…');
  status('WebGPU optics experiment. Physical water has a safe fallback; original FFT lab is unchanged.');
  scene=new THREE.Scene();scene.background=new THREE.Color(0x9bcddf);scene.userData.dayBackground=scene.background;
  scene.fog=new THREE.Fog(0x9bcddf,155,370);
@@ -8435,14 +8470,17 @@ async function init3D(forceWebGL=false){
   }
  };
  renderer.setAnimationLoop(render);
+ window.__waterLoading?.progress(88,'Rendering first ocean frame…');
  window.__waterFallback?.hide();
  loopActive=true;
+ window.__waterLoading?.complete();
  window.addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);});
 }
 async function begin(){
+ window.__waterLoading?.progress(8,'Checking WebGPU support…');
  const api=!!navigator.gpu;
  let adapter=null;
- if(api)try{adapter=await navigator.gpu.requestAdapter({powerPreference:'high-performance'})}catch(e){status('Adapter error: '+e.message);}
+ if(api)try{adapter=await navigator.gpu.requestAdapter({powerPreference:'high-performance'});window.__waterLoading?.progress(14,'Graphics adapter acquired…');}catch(e){status('Adapter error: '+e.message);}
  if(!adapter){
   status(api?'WebGPU adapter unavailable; trying WebGL':'WebGPU API unavailable; trying WebGL');
   await init3D(true);return;
@@ -8456,10 +8494,11 @@ async function begin(){
  }
 }
 begin().catch(error=>{
+ window.__waterLoading?.fail('Initialization failed: '+(error?.message||error));
  $('backend').textContent='Backend: failed';
  status('WebGPU and WebGL failed: '+(error?.message||error)+'. Animated fallback remains visible.');
  console.error(error);
 });
 </script>
 </body></html>
-<!-- GitHub Pages redeploy trigger for Water Lab 28.9.4 -->
+<!-- GitHub Pages redeploy trigger for Water Lab 28.9.5 -->

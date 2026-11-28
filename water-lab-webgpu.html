@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.9.1 Natural shoreline physics</title>
+<title>Rift Water Lab · WebGPU 28.9.2 Natural shoreline physics</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.9.1</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.9.2</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="frameProfile" style="font-size:11px;line-height:1.4;color:#b5e4e8;margin:4px 0" role="status">Frame profiler: collecting</div>
@@ -7173,8 +7173,27 @@ function makeWalkCharacter(){
  }
  player.name='Beach explorer';scene.add(player);
 }
+function islandWalkGroundHeight(x,z){
+ const coast=islandCoastZ(x),along=Math.max(0,Math.min(1,(coast+.18-z)/82));
+ const ridge=5.5*Math.exp(-((x/34)**2+((along-.53)/.36)**2)*1.42);
+ const west=1.45*Math.exp(-(((x+27)/17)**2+((along-.62)/.23)**2)*1.55);
+ const east=1.25*Math.exp(-(((x-28)/15)**2+((along-.45)/.25)**2)*1.55);
+ const shoulder=.55*Math.exp(-(((x+4)/43)**2+((along-.82)/.17)**2)*1.8);
+ const undulation=.20*Math.sin(x*.21+along*13)*Math.sin(x*.095-along*19);
+ return Math.max(.24,.24+ridge+west+east+shoulder+undulation);
+}
 function beachGround(x,z){
- return beachSurfaceHeight(x,z);
+ const coast=islandCoastZ(x),offset=z-coast;
+ if(offset>=.18&&offset<=20.18)return beachSurfaceHeight(x,z);
+ return islandWalkGroundHeight(x,z);
+}
+function isWalkableIslandPoint(x,z){
+ if(Math.abs(x)>65)return false;
+ const coast=islandCoastZ(x),offset=z-coast;
+ if(offset>=.05&&offset<=20.35)return true;
+ const along=(coast+.18-z)/82;
+ if(along<0||along>1)return false;
+ return Math.abs(x)<=62*islandWidthFactor(along)-.25;
 }
 function setWalkMode(enabled){
  if(!player||!boat)return;
@@ -7195,8 +7214,10 @@ function stepPlayer(dt){
  if(!walkMode||!player?.visible||dt<=0)return;
  if(walkLeft)walkHeading+=dt*1.65;if(walkRight)walkHeading-=dt*1.65;
  if(walkForward){
-  const nx=player.position.x-Math.sin(walkHeading)*dt*3.1,nz=player.position.z-Math.cos(walkHeading)*dt*3.1,offset=nz-islandCoastZ(nx);
-  if(Math.abs(nx)<=64&&offset>=.55&&offset<=19.6){player.position.x=nx;player.position.z=nz;}
+  const nx=player.position.x-Math.sin(walkHeading)*dt*3.1,nz=player.position.z-Math.cos(walkHeading)*dt*3.1;
+  // Permit movement over the full island heightfield as well as the beach;
+  // reject only points beyond the island perimeter or out into the ocean.
+  if(isWalkableIslandPoint(nx,nz)){player.position.x=nx;player.position.z=nz;}
  }
  player.position.y=beachGround(player.position.x,player.position.z)+.04;player.rotation.y=walkHeading;
 }
@@ -8430,4 +8451,4 @@ begin().catch(error=>{
 });
 </script>
 </body></html>
-<!-- GitHub Pages redeploy trigger for Water Lab 28.9.1 -->
+<!-- GitHub Pages redeploy trigger for Water Lab 28.9.2 -->

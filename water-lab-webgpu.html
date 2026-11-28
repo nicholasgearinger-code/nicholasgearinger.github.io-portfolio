@@ -7138,7 +7138,7 @@ function setWalkMode(enabled){
  if(enabled){
   const coast=islandCoastZ(boat.position.x),gap=boat.position.z-(coast+20);
   if(gap>7.5){$('log').textContent='Sail closer to the beach before leaving the boat.';return;}
-  player.position.set(boat.position.x,beachGround(boat.position.x,coast+3)+.04,coast+3);
+  player.position.set(boat.position.x,beachGround(boat.position.x,coast+19.2)+.04,coast+19.2);
   walkHeading=boatHeading;player.rotation.y=walkHeading;player.visible=true;walkMode=true;boatSpeed=0;setDriveMode('stop');
   $('leaveBoat').textContent='Return to boat';$('port').textContent='◀ Turn';$('starboard').textContent='Turn ▶';$('forward').textContent='▲ Walk';$('stopBoat').textContent='Board boat';$('buoyancyState').textContent='On foot · walkable beach';
  }else{
@@ -7407,8 +7407,8 @@ function setDriveMode(mode){
 $('forward').onclick=()=>setDriveMode('forward');
 $('stopBoat').onclick=()=>setDriveMode('stop');
 // Immediate touch/pointer feedback, independent of synthesized click delays.
-$('forward').addEventListener('pointerdown',()=>setDriveMode('forward'));
-$('stopBoat').addEventListener('pointerdown',()=>setDriveMode('stop'));
+$('forward').addEventListener('pointerdown',()=>{if(walkMode)walkForward=true;else setDriveMode('forward');});
+$('stopBoat').addEventListener('pointerdown',()=>{if(walkMode)setWalkMode(false);else setDriveMode('stop');});
 $('sailPower').oninput=()=>{
  sailPower=Number($('sailPower').value);
  $('sailPowerOut').textContent=Math.round(sailPower*100)+'%';

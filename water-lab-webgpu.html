@@ -3116,6 +3116,27 @@ function resolveIslandBoatCollision(previousX,previousZ){
  hullSlipX=0;hullSlipZ=0;
  return true;
 }
+function resolveShallowBoatGrounding(previousX,previousZ){
+ if(!boat)return false;
+ const points=[[0,0],[-1.05,-2.1],[1.05,-2.1],[-1.05,2.0],[1.05,2.0]];
+ let minimum=Infinity;
+ for(const [lx,lz] of points){
+  const x=boat.position.x+lx*Math.cos(boatHeading)+lz*Math.sin(boatHeading);
+  const z=boat.position.z-lx*Math.sin(boatHeading)+lz*Math.cos(boatHeading);
+  minimum=Math.min(minimum,seabedDepth(x,z));
+ }
+ // The hull grounds only at the last few decimetres of water. It can
+ // approach the beach through the full shallow shelf before stopping.
+ if(minimum<.24){
+  boat.position.x=previousX;boat.position.z=previousZ;
+  boatSpeed=Math.min(boatSpeed,.08);hullSlipX=0;hullSlipZ=0;
+  return true;
+ }
+ // Shallow water adds realistic drag before the keel touches bottom.
+ const drag=Math.max(0,Math.min(1,(1.5-minimum)/1.26));
+ boatSpeed*=1-drag*.035;
+ return false;
+}
 
 function createSeabed(){
  const n=160,geo=new THREE.PlaneGeometry(420,420,n,n);
@@ -7247,6 +7268,7 @@ function stepBoatClassic(dt,t){
   boat.position.x+=(-Math.sin(boatHeading)*boatSpeed+hullSlipX)*h;
   boat.position.z+=(-Math.cos(boatHeading)*boatSpeed+hullSlipZ)*h;
   resolveIslandBoatCollision(priorBoatX,priorBoatZ);
+  resolveShallowBoatGrounding(priorBoatX,priorBoatZ);
   totalTravel+=boatSpeed*h;
   boat.rotation.y=boatHeading;
   const dynamic=hullPhysics==='dynamic';

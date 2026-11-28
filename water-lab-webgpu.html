@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.12.4 Unified hull boundaries</title>
+<title>Rift Water Lab · WebGPU 28.12.5 Stable heading-local buoyancy</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -109,7 +109,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.12.4</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.12.5</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="islandWaypoint" style="display:flex;align-items:center;gap:9px;padding:7px 0;color:#c5f5e9;font-size:13px"><span id="islandArrow" style="display:inline-block;font-size:22px;line-height:1;transform-origin:center">↑</span><span id="islandDistance">Island · locating</span></div>
@@ -7642,15 +7642,17 @@ function stepBoat(dt,t){
    const exterior=probeSide>0?left:probeSide<0?right:(left+right)*.5;
    const breaker=sampleBreakerHull(x,z,t+k*h,breakerHullScratch);
    const reconstructedHeight=rcSurfaceOffset(x,z)*localWaterBlend(Math.hypot(x-boat.position.x,z-boat.position.z));
-   const surface=exterior+Math.max(breaker.height,Math.min(.45,reconstructedHeight)),depth=surface-y;
+   const surface=exterior+Math.max(breaker.height*.65,Math.min(.18,reconstructedHeight)),depth=surface-y;
    exteriorSum+=surface*p[3];exteriorWeight+=p[3];
    if(!Number.isFinite(depth)||depth<=0)continue;
-   const area=4.5*p[3]/hydroArea,sub=Math.min(.85,depth),fraction=Math.min(1,depth/.22);
+   const area=4.5*p[3]/hydroArea,sub=Math.min(.58,depth),fraction=Math.min(1,depth/.22);
    wet+=p[3]*fraction;
    const ok=breakingMode==='advanced'&&sampleFluid3(x,y,z,hullFlowSample);
    const ux=(ok?hullFlowSample.x:0)+breaker.x,uz=(ok?hullFlowSample.z:0)+breaker.z;
    const uy=(ok?hullFlowSample.y*.30:0)+(wakeSolver?.sampleVelocity(x,z)||0)*.22+breaker.y;
-   const localV=vy+rollV*ox-pitchV*oz;
+   // Resolve angular velocity and buoyancy torque in the heading-local frame.
+   const localX=rx*ox+rz*oz,localZ=-(fx*ox+fz*oz);
+   const localV=vy+rollV*localX-pitchV*localZ;
    const relY=localV-Math.max(-2.5,Math.min(2.5,uy));
    const buoy=1000*9.81*area*sub*buoyancyStrength;
    // Resist relative heave without generating a large rebound impulse.
@@ -7658,7 +7660,7 @@ function stepBoat(dt,t){
    const impact=area*45*Math.min(2.25,Math.max(0,-relY)**2)*fraction;
    if(depth<.20&&relY<-.65){const a=area*fraction;entryX+=x*a;entryZ+=z*a;entryArea+=a;entrySpeed=Math.max(entrySpeed,-relY);}
    const force=Math.max(-buoy*.32,Math.min(buoy*2.1+area*220,buoy+damp+impact));
-   fy+=force;tx-=oz*force;tz+=ox*force;slam+=impact;
+   fy+=force;tx-=localZ*force;tz+=localX*force;slam+=impact;
    const relX=vx+hullYawRate*oz-ux,relZ=vz-hullYawRate*ox-uz;
    const along=relX*fx+relZ*fz,side=relX*rx+relZ*rz;
    const dragAlong=-area*fraction*(14*along+3.8*along*Math.abs(along));
@@ -7674,7 +7676,9 @@ function stepBoat(dt,t){
   if(hullReactionEnabled&&breakingMode==='advanced'&&hullAP){const freshness=Math.exp(-Math.max(0,t-hullReaction.last-.10)*9),gain=freshness*hullContact;forceX+=hullReaction.x*gain;forceZ+=hullReaction.z*gain;fy+=hullReaction.y*gain;tx+=hullReaction.pitch*gain;tz+=hullReaction.roll*gain;yaw+=hullReaction.yaw*gain;}
   if(deckFloodEnabled&&breakingMode==='advanced'){tx+=Math.max(-100,Math.min(100,deckMomentZ*9.81));tz-=Math.max(-75,Math.min(75,deckMomentX*9.81));}
   // No hydrodynamic torque or thrust in free flight. Existing wake persists.
-  tx-=pitchV*Ix*(.04+3.2*rideDamping*hullContact);tz-=rollV*Iz*(.04+3.1*rideDamping*hullContact);
+  // Bounded righting moment for the low center of gravity; no forced wave alignment.
+  tx-=Ix*hullContact*(boat.rotation.x*2.4+pitchV*4.2*Math.max(.65,rideDamping));
+  tz-=Iz*hullContact*(boat.rotation.z*3.2+rollV*4.5*Math.max(.65,rideDamping));
   const thrust=forward?throttle*mass*sailPower*(powered?8.2:3.0*(.35+.65*Math.abs(Math.cos(boatHeading+.7)))):0;
   forceX+=fx*thrust*hullContact;forceZ+=fz*thrust*hullContact;
   const steer=rudder;
@@ -7716,13 +7720,14 @@ function stepBoat(dt,t){
   boat.position.y+=vy*h;
   // Last-resort ride envelope prevents numerical launch or deep sinking.
   // Ordinary wave motion remains force-driven within these limits.
-  const lowerRide=Math.max(meanSea-.27,hullRideReference-.22),upperRide=Math.max(lowerRide+.10,hullRideReference+.32);
+  const lowerRide=hullRideReference-.32,upperRide=hullRideReference+.38;
   if(boat.position.y<lowerRide){boat.position.y=lowerRide;vy=Math.max(vy,hullRideRate);}
   if(boat.position.y>upperRide){boat.position.y=upperRide;vy=Math.min(vy,hullRideRate);}
   boat.rotation.y=boatHeading;
   boat.rotation.x=Math.max(-.30,Math.min(.30,boat.rotation.x+pitchV*h));
   boat.rotation.z=Math.max(-.27,Math.min(.27,boat.rotation.z+rollV*h));
-  if(Math.abs(boat.rotation.x)>=.30)pitchV*=.4;if(Math.abs(boat.rotation.z)>=.27)rollV*=.4;
+  if(Math.abs(boat.rotation.x)>=.30&&boat.rotation.x*pitchV>0)pitchV=0;
+  if(Math.abs(boat.rotation.z)>=.27&&boat.rotation.z*rollV>0)rollV=0;
   if(!Number.isFinite(boat.position.y+boat.position.x+boat.position.z+boatHeading+vy+pitchV+rollV)){resetBoat();return;}
  }
 }
@@ -8758,4 +8763,4 @@ begin().catch(error=>{
 });
 </script>
 </body></html>
-<!-- GitHub Pages redeploy trigger for Water Lab 28.12.4 -->
+<!-- GitHub Pages redeploy trigger for Water Lab 28.12.5 -->

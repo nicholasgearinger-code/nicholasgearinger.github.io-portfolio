@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.11.2 Volumetric bubble clouds</title>
+<title>Rift Water Lab · WebGPU 28.11.3 Volumetric bubble clouds</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -109,7 +109,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.11.2</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.11.3</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="islandWaypoint" style="display:flex;align-items:center;gap:9px;padding:7px 0;color:#c5f5e9;font-size:13px"><span id="islandArrow" style="display:inline-block;font-size:22px;line-height:1;transform-origin:center">↑</span><span id="islandDistance">Island · locating</span></div>
@@ -3784,8 +3784,8 @@ function updateBreakerAeration(t){
  const births=Math.min(12,Math.floor(foamBubbleSpawn));foamBubbleSpawn-=births;
  for(let i=0;i<births*4&&foamBubbles.length<(simTier===2?240:simTier===1?360:540)&&i<48;i++){
   const seed=++foamBubbleSeed;
-  const angle=seed*2.399963,radius=Math.sqrt(bubbleHash(seed))*13;
-  const x=boat.position.x+Math.cos(angle)*radius,z=boat.position.z+Math.sin(angle)*radius;
+  const angle=seed*2.399963,spawnRadius=Math.sqrt(bubbleHash(seed))*13;
+  const x=boat.position.x+Math.cos(angle)*spawnRadius,z=boat.position.z+Math.sin(angle)*spawnRadius;
   const k=1+Math.floor(bubbleHash(seed+31)*(FOAM_LAYERS-1));
   const density=foamLayer(x,z,k,entrainedAir);
   if(density<.018||bubbleHash(seed+71)>Math.min(1,density*3))continue;
@@ -8642,4 +8642,4 @@ begin().catch(error=>{
 });
 </script>
 </body></html>
-<!-- GitHub Pages redeploy trigger for Water Lab 28.11.2 -->
+<!-- GitHub Pages redeploy trigger for Water Lab 28.11.3 -->

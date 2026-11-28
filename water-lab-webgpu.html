@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.12.16 Natural crest and capillary optics</title>
+<title>Rift Water Lab · WebGPU 28.13.0 Unified dielectric water optics</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -109,7 +109,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.12.16</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.13.0</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="islandWaypoint" style="display:flex;align-items:center;gap:9px;padding:7px 0;color:#c5f5e9;font-size:13px"><span id="islandArrow" style="display:inline-block;font-size:22px;line-height:1;transform-origin:center">↑</span><span id="islandDistance">Island · locating</span></div>
@@ -327,13 +327,18 @@ function createOceanMaterial(options){
   setupUnderwaterMirror();
   const v=cameraPosition.sub(positionWorld).normalize();
   const cosine=normalWorld.normalize().dot(v).abs().clamp(0,1);
-  const eta=float(1.333),sin2=eta.mul(eta).mul(float(1).sub(cosine.mul(cosine)));
-  const ct=float(1).sub(sin2).max(0).sqrt();
-  const ec=eta.mul(cosine),rs=ec.sub(ct).div(ec.add(ct).max(.0001));
-  const ect=eta.mul(ct),rp=cosine.sub(ect).div(cosine.add(ect).max(.0001));
-  const fresnel=rs.mul(rs).add(rp.mul(rp)).mul(.5).clamp(0,1);
-  const tir=oceanTSL.smoothstep(.985,1.015,sin2);
-  const reflectance=fresnel.mul(float(1).sub(tir)).add(tir);
+  // One reciprocal dielectric interface, evaluated from either medium.
+  // Keep the optical transition separate from geometry and scene capture.
+  const dielectric=(ci,ratio)=>{
+   const sin2=ratio.mul(ratio).mul(float(1).sub(ci.mul(ci)));
+   const ct=float(1).sub(sin2).max(0).sqrt();
+   const ec=ratio.mul(ci),ect=ratio.mul(ct);
+   const rs=ec.sub(ct).div(ec.add(ct).max(.0001));
+   const rp=ci.sub(ect).div(ci.add(ect).max(.0001));
+   const tir=oceanTSL.smoothstep(.995,1.005,sin2);
+   return rs.mul(rs).add(rp.mul(rp)).mul(.5).clamp(0,1).mul(float(1).sub(tir)).add(tir);
+  };
+  const reflectance=dielectric(cosine,float(1.333));
   const wet=oceanAngleBlend.mul(oceanTSL.smoothstep(-.10,.015,v.y.negate()));
   const sculpted=wet.mul(enhancedUnderwaterLight?1:0);
   // Separate optical extinction from geometric refraction offset. The
@@ -352,16 +357,14 @@ function createOceanMaterial(options){
   const above=oceanTSL.smoothstep(-.04,.08,v.y).mul(oceanColumnEnabled).mul(float(1).sub(oceanAngleBlend));
   const bottomVisibility=path.mul(oceanColumnSigma).negate().exp();
   // Physical air-to-water Fresnel, including grazing-angle rise.
-  const airRs=cosine.sub(refractedCos.mul(1.333)).div(cosine.add(refractedCos.mul(1.333)).max(.0001));
-  const airRp=cosine.mul(1.333).sub(refractedCos).div(cosine.mul(1.333).add(refractedCos).max(.0001));
-  const airFresnel=airRs.mul(airRs).add(airRp.mul(airRp)).mul(.5).clamp(0,1);
+  const airFresnel=dielectric(cosine,float(1/1.333));
   // Preserve transparent near-normal views without reintroducing an unattenuated pool.
   const visibleBottom=bottomVisibility.mul(.92).add(.08).mul(float(1).sub(airFresnel));
   const columnTransmission=float(1).sub(above.mul(float(1).sub(visibleBottom.mul(.78))));
   mat.transmissionNode=materialTransmission.mul(columnTransmission).mul(float(1).sub(wet.mul(reflectance))).mul(float(1).sub(sculpted));
   // Suppress the pale lit surface lobe below water; radiance is rebuilt
   // from the lens and Fresnel terms, not from the above-water albedo.
-  mat.colorNode=materialColor.rgb.mul(float(1).sub(sculpted.mul(.94)));
+  mat.colorNode=materialColor.rgb.mul(float(1).sub(sculpted.mul(.94))).mul(float(1).sub(airFresnel.mul(above).mul(.72)));
   // Approximate reflected underwater radiance, not a second scene capture.
   let radiance=vec3(.045,.19,.24).mul(oceanAngleDepth.mul(-.065).exp());
   if(underwaterMirror&&mirrorMatrix&&mirrorWeight){
@@ -398,7 +401,7 @@ function createOceanMaterial(options){
   const nl=microNormal.dot(sun).max(0).clamp(0,1);
   const nv=microNormal.dot(v).max(.02).clamp(.02,1);
   const vh=v.dot(halfVector).clamp(0,1);
-  const f=float(.02037).add(float(.97963).mul(float(1).sub(vh).pow(5)));
+  const f=dielectric(vh,float(1/1.333));
   // Broadens unresolved glints offshore to reduce temporal aliasing.
   oceanRoughnessControls=uniform(new THREE.Vector3(windRipples,underwaterBlend,1));
   const slope=float(1).sub(n.y.abs().clamp(0,1));
@@ -409,14 +412,14 @@ function createOceanMaterial(options){
    .add(float(1).sub(detailFade).mul(.055))
    .add(oceanRoughnessControls.y.mul(.022)).clamp(.045,.24);
   mat.roughnessNode=physicalRoughness.add(sculpted.mul(.18)).clamp(.045,.42);
-  const alpha=physicalRoughness.add(microVariance.mul(.035)).clamp(.045,.28);
+  const alpha=physicalRoughness.add(microVariance.mul(.035)).clamp(.045,.28).pow(2);
   const a2=alpha.mul(alpha);
   const denom=nh.mul(nh).mul(a2.sub(1)).add(1);
   const distribution=a2.div(denom.mul(denom).mul(Math.PI).max(.000001));
-  const k=alpha.add(1).pow(2).mul(.125);
+  const k=physicalRoughness.add(1).pow(2).mul(.125);
   const geometryTerm=nl.div(nl.mul(float(1).sub(k)).add(k)).mul(nv.div(nv.mul(float(1).sub(k)).add(k)));
   const glint=distribution.mul(geometryTerm).mul(f).div(nv.mul(4).max(.08)).clamp(0,1.35)
-   .mul(nl.greaterThan(0).select(1,0)).mul(oceanGlintControls.y.clamp(0,2)).mul(.25).mul(above);
+   .mul(nl.greaterThan(0).select(1,0)).mul(oceanGlintControls.y.clamp(0,2)).mul(.18).mul(above);
   // Forward scattering through thin, backlit crests. Continuous height
   // and lighting dependence, independent of the local simulation domain.
   const crest=oceanTSL.smoothstep(.20,1.45,positionWorld.y);
@@ -8866,4 +8869,4 @@ begin().catch(error=>{
 });
 </script>
 </body></html>
-<!-- GitHub Pages redeploy trigger for Water Lab 28.12.16 -->
+<!-- GitHub Pages redeploy trigger for Water Lab 28.13.0 -->

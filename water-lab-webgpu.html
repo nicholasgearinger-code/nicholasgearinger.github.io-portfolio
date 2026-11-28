@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rift Water Lab · WebGPU 28.9.2 Natural shoreline physics</title>
+<title>Rift Water Lab · WebGPU 28.9.3 Natural shoreline physics</title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif}*{box-sizing:border-box}
 body{margin:0;background:#061d29;color:#e3f9fc;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%}
@@ -72,7 +72,7 @@ button,a{border-radius:10px;padding:9px 12px;color:#defeff;background:#11506a;bo
 <div id="dashboard">
  <div class="panel" id="hudPanel">
   <div class="hudRow">
-   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.9.2</span></span>
+   <span class="hudTitle">Rift Water Lab <span style="color:#6de3e4">28.9.3</span></span>
    <div class="hudReadout"><span id="fps">FPS: —</span><span id="boatSpeed">Speed: 0.0</span></div>
   </div>
   <div id="frameProfile" style="font-size:11px;line-height:1.4;color:#b5e4e8;margin:4px 0" role="status">Frame profiler: collecting</div>
@@ -7064,23 +7064,26 @@ function animateWaves(t){
   const x=px+cx,z=pz+cz;
   if(offshoreGPU?.mask[i/3]){if(offshoreTint){const w=waveField(x,z,t);oceanSpectralTint(x,z,w.height,w.slopeX,w.slopeZ,nearColorData,i);}deformationWeights[i/3]=0;continue;}
   const wave=waveField(x,z,t);
-  const coast=islandCoastZ(x),shoreX=Math.abs(x)<=65;
-  const landward=shoreX&&z<coast+.18;
-  const beach=shoreX&&z>=coast+.18&&z<=coast+20.18;
-  const ground=beach?beachSurfaceHeight(x,z):.24;
   const wx=x+wave.dx,wz=z+wave.dz;
-  const fade=oceanFieldSupport(wx,wz,36,4);
-  if(fade<=0){arr[i]=px+wave.dx;arr[i+1]=wave.height;arr[i+2]=pz+wave.dz;smoothWaterNormal(nearNormals,i,wave.slopeX,wave.slopeZ);oceanSpectralTint(x,z,wave.height,wave.slopeX,wave.slopeZ,nearColorData,i);deformationWeights[i/3]=0;continue;}
+  // Shoreline collision is evaluated in absolute world space before any
+  // radial-support/GPU fallback. The island itself never inherits boat motion.
+  const coast=islandCoastZ(wx),shoreX=Math.abs(wx)<=65;
+  const landward=shoreX&&wz<coast+.18;
+  const beach=shoreX&&wz>=coast+.18&&wz<=coast+20.18;
+  const ground=beach?beachSurfaceHeight(wx,wz):.24;
   const disturbance=oceanWakeOffset(wx,wz);
-  arr[i]=px+wave.dx;arr[i+2]=pz+wave.dz;
   const liquidLift=rcSurfaceOffset(wx,wz);
   const waterY=wave.height+disturbance+liquidLift;
-  // Dry ground occludes the ocean mesh; the outer wet-sand edge remains
-  // water-covered so small waves can wash onto the beach naturally.
+  // Hide water wherever the fixed island/beach surface is above the wave.
+  // This test runs even outside the local wake support, preventing the
+  // fallback surface from drawing through the land.
   if(landward||(beach&&ground>waterY+.012)){
    arr[i+1]=-8;deformationWeights[i/3]=0;smoothWaterNormal(nearNormals,i,0,0);
-   oceanSpectralTint(x,z,0,0,0,nearColorData,i);continue;
+   oceanSpectralTint(wx,wz,0,0,0,nearColorData,i);continue;
   }
+  const fade=oceanFieldSupport(wx,wz,36,4);
+  if(fade<=0){arr[i]=px+wave.dx;arr[i+1]=waterY;arr[i+2]=pz+wave.dz;smoothWaterNormal(nearNormals,i,wave.slopeX,wave.slopeZ);oceanSpectralTint(wx,wz,waterY,wave.slopeX,wave.slopeZ,nearColorData,i);deformationWeights[i/3]=0;continue;}
+  arr[i]=px+wave.dx;arr[i+2]=pz+wave.dz;
   arr[i+1]=waterY;
   if(liquidLift>.002)crestVertices++;
   const folded=plungePool.length&&deformConnectedCrest(x,z,arr,i,fade);if(folded)crestVertices++;
@@ -7202,7 +7205,7 @@ function setWalkMode(enabled){
   if(gap>7.5){$('log').textContent='Sail closer to the beach before leaving the boat.';return;}
   player.position.set(boat.position.x,beachGround(boat.position.x,coast+19.2)+.04,coast+19.2);
   walkHeading=boatHeading;player.rotation.y=walkHeading;player.visible=true;walkMode=true;boatSpeed=0;setDriveMode('stop');
-  $('leaveBoat').textContent='Return to boat';$('port').textContent='◀ Turn';$('starboard').textContent='Turn ▶';$('forward').textContent='▲ Walk';$('stopBoat').textContent='Board boat';$('buoyancyState').textContent='On foot · walkable beach';
+  $('leaveBoat').textContent='Return to boat';$('port').textContent='◀ Turn';$('starboard').textContent='Turn ▶';$('forward').textContent='▲ Walk';$('stopBoat').textContent='Board boat';$('buoyancyState').textContent='On foot · hold Walk to move';
  }else{
   if(Math.hypot(player.position.x-boat.position.x,player.position.z-boat.position.z)>7){$('log').textContent='Walk closer to the boat to board it.';return;}
   walkMode=false;player.visible=false;walkForward=walkLeft=walkRight=false;
@@ -7470,8 +7473,8 @@ function setDriveMode(mode){
  $('buoyancyState').textContent=driveMode==='forward'?'Boat: sailing forward':'Boat: stopped / braking';
  $('driveStatus').textContent='Drive: '+(driveMode==='forward'?'FORWARD':'STOP');
 }
-$('forward').onclick=()=>setDriveMode('forward');
-$('stopBoat').onclick=()=>setDriveMode('stop');
+$('forward').onclick=()=>{if(!walkMode)setDriveMode('forward');};
+$('stopBoat').onclick=()=>{if(!walkMode)setDriveMode('stop');};
 // Immediate touch/pointer feedback, independent of synthesized click delays.
 $('forward').addEventListener('pointerdown',()=>{if(walkMode)walkForward=true;else setDriveMode('forward');});
 $('stopBoat').addEventListener('pointerdown',()=>{if(walkMode)setWalkMode(false);else setDriveMode('stop');});
@@ -7575,8 +7578,10 @@ function updateCamera(dt){
 }
 $('modeSwitch').onclick=setCameraMode;
 $('leaveBoat').onclick=()=>setWalkMode(!walkMode);
-$('forward').onclick=()=>{if(walkMode)walkForward=true;else setDriveMode('forward');};
-$('stopBoat').onclick=()=>{if(walkMode)setWalkMode(false);else setDriveMode('stop');};
+// Walking is a hold-to-move action; pointerup releases it. Avoid a
+// synthesized click re-arming movement after the finger is lifted.
+$('forward').onclick=()=>{if(!walkMode)setDriveMode('forward');};
+$('stopBoat').onclick=()=>{if(!walkMode)setDriveMode('stop');};
 $('port').addEventListener('pointerdown',()=>{if(walkMode)walkLeft=true;});
 $('starboard').addEventListener('pointerdown',()=>{if(walkMode)walkRight=true;});
 for(const [id,dir] of [['port','left'],['starboard','right']])for(const ev of ['pointerup','pointercancel','lostpointercapture'])$(id).addEventListener(ev,()=>{if(dir==='left')walkLeft=false;else walkRight=false;});
@@ -8451,4 +8456,4 @@ begin().catch(error=>{
 });
 </script>
 </body></html>
-<!-- GitHub Pages redeploy trigger for Water Lab 28.9.2 -->
+<!-- GitHub Pages redeploy trigger for Water Lab 28.9.3 -->
